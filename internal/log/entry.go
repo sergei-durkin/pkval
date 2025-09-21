@@ -99,7 +99,8 @@ func NewCheckpoint() Entry {
 	}
 }
 
-func (e *Entry) Serialize() []byte {
+// Pack packs the Entry into a byte slice.
+func (e *Entry) Pack() []byte {
 	serialized := make([]byte, headerSize+keySize+len(e.Key)+len(e.Data))
 
 	// Header

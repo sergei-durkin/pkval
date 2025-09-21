@@ -28,7 +28,7 @@ type Transaction struct {
 }
 
 func (l *Log) Append(entry Entry) error {
-	err := l.pb.Write(entry.Serialize())
+	err := l.pb.Write(entry.Pack())
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func (l *Log) append(entry Entry) error {
 	}
 
 	cp := NewCheckpoint()
-	err := l.pb.Write(cp.Serialize())
+	err := l.pb.Write(cp.Pack())
 	if err != nil {
 		return err
 	}
