@@ -9,12 +9,12 @@ import (
 type EntryType uint8
 
 const (
-	WriteEntry EntryType = iota
-	DeleteEntry
-	BeginEntry
-	CommitEntry
-	RollbackEntry
-	CheckpointEntry
+	WriteEntry      EntryType = 1
+	DeleteEntry     EntryType = 2
+	BeginEntry      EntryType = 3
+	CommitEntry     EntryType = 4
+	RollbackEntry   EntryType = 5
+	CheckpointEntry EntryType = 6
 )
 
 type header struct {

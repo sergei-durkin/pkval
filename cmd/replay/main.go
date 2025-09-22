@@ -128,16 +128,14 @@ func GetReaders(args []cmd.Arg) ([]wal.ReaderCloser, error) {
 	}
 
 	slices.SortFunc(entries, func(a, b os.DirEntry) int {
-		if a.IsDir() {
-			return 1
-		}
-		if b.IsDir() {
+		if a.IsDir() || b.IsDir() {
 			return -1
 		}
 
 		if a.Name() < b.Name() {
 			return -1
 		}
+
 		if a.Name() > b.Name() {
 			return 1
 		}
