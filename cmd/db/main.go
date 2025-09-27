@@ -45,7 +45,7 @@ func main() {
 
 	go func() {
 		for i := 0; i < 10; i++ {
-			p := pg.Alloc(db.PageTypeLeaf)
+			p := pg.Alloc(505, db.PageTypeLeaf)
 			fmt.Fprintf(p, "This is page %d\n", i)
 			pg.Write(p)
 		}

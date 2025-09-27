@@ -3,13 +3,14 @@ package db
 import (
 	"fmt"
 	"unsafe"
+	"wal/internal/pack"
 	"wal/internal/unpack"
 )
 
 const (
 	pageSize = 1 << 13
 
-	headerSize   = int(unsafe.Sizeof(head{}))
+	headerSize   = int(unsafe.Sizeof(header{}))
 	pageDataSize = pageSize - headerSize
 )
 
@@ -19,15 +20,18 @@ const (
 	PageTypeOverflow uint16 = 3
 )
 
-type head struct {
+type header struct {
+	id   uint64
+	lsn  uint64
 	typ  uint16
 	used bool
+
+	_ [48]byte // padding
 }
 
 type Page struct {
-	head
+	header
 
-	id   uint64
 	data [pageDataSize]byte
 }
 
@@ -39,27 +43,27 @@ func NewPageFromBytes(b []byte) (*Page, error) {
 	p := &Page{}
 
 	ptr := 0
-	p.typ, ptr = unpack.Uint16(&b, ptr)
+	p.id, ptr = unpack.Uint64(b, ptr)
+	p.lsn, ptr = unpack.Uint64(b, ptr)
+	p.typ, ptr = unpack.Uint16(b, ptr)
 
 	var used uint16
-	used, ptr = unpack.Uint16(&b, ptr)
-
+	used, ptr = unpack.Uint16(b, ptr)
 	p.used = used != 0
-	p.id, ptr = unpack.Uint64(&b, ptr)
 
 	copy(p.data[:], b[headerSize:])
 
 	return p, nil
 }
 
-func NewPage(id uint64, typ uint16) *Page {
+func NewPage(id uint64, lsn uint64, typ uint16) *Page {
 	return &Page{
-		head: head{
+		header: header{
+			id:   id,
+			lsn:  lsn,
 			typ:  typ,
 			used: true,
 		},
-
-		id: id,
 	}
 }
 
@@ -71,4 +75,24 @@ func (p *Page) Write(data []byte) (int, error) {
 	n := copy(p.data[:], data)
 
 	return n, nil
+}
+
+func (p *Page) Pack() []byte {
+	buff := make([]byte, pageSize)
+
+	ptr := 0
+	ptr = pack.Uint64(buff, p.id, ptr)
+	ptr = pack.Uint64(buff, p.lsn, ptr)
+	ptr = pack.Uint16(buff, p.typ, ptr)
+
+	var used uint16
+	if p.used {
+		used = 1
+	}
+
+	ptr = pack.Uint16(buff, used, ptr)
+
+	copy(buff[headerSize:], p.data[:])
+
+	return buff
 }

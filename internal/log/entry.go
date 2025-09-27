@@ -107,16 +107,16 @@ func (e *Entry) Pack() []byte {
 	ptr := 0
 
 	// Type
-	ptr = pack.Uint8(uint8(e.typ), &serialized, ptr)
+	ptr = pack.Uint8(serialized, uint8(e.typ), ptr)
 
 	// Transaction ID
-	_ = pack.Uint64(e.txid, &serialized, ptr)
+	_ = pack.Uint64(serialized, e.txid, ptr)
 
 	// Key
 	ptr = headerSize
 
 	// Key length
-	ptr = pack.Uint32(uint32(len(e.Key)), &serialized, ptr)
+	ptr = pack.Uint32(serialized, uint32(len(e.Key)), ptr)
 
 	// Key data
 	ptr += copy(serialized[ptr:], e.Key)
@@ -135,11 +135,11 @@ func NewFromBytes(data []byte) Entry {
 	// Header
 
 	// Type
-	typ, ptr := unpack.Uint8(&data, ptr)
+	typ, ptr := unpack.Uint8(data, ptr)
 	e.typ = EntryType(typ)
 
 	// Transaction ID
-	txid, ptr := unpack.Uint64(&data, ptr)
+	txid, ptr := unpack.Uint64(data, ptr)
 	e.txid = txid
 
 	ptr = headerSize
@@ -147,7 +147,7 @@ func NewFromBytes(data []byte) Entry {
 	// Key
 
 	// Key length
-	keyLen, ptr := unpack.Uint32(&data, ptr)
+	keyLen, ptr := unpack.Uint32(data, ptr)
 
 	// Key data
 	e.Key = string(data[ptr : ptr+int(keyLen)])

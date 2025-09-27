@@ -101,7 +101,7 @@ func main() {
 		}
 	}
 
-	<-ctx.Done()
+	time.Sleep(3 * time.Second)
 }
 
 func GetReaders(args []cmd.Arg) ([]wal.ReaderCloser, error) {
