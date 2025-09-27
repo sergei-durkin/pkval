@@ -22,7 +22,7 @@ func NewWriter(args []cmd.Arg) func() (wal.WriterCloser, error) {
 		if arg.Name == LOG_FILE && arg.Value != "" {
 			return func() (wal.WriterCloser, error) {
 				timestamp := time.Now().Format(TIME_FORMAT)
-				f, err := os.OpenFile(fmt.Sprintf(FILENAME_FORMAT, arg.Value, timestamp), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+				f, err := os.OpenFile(fmt.Sprintf(FILENAME_FORMAT, arg.Value, timestamp), os.O_CREATE|os.O_WRONLY, 0644)
 				if err != nil {
 					return nil, err
 				}

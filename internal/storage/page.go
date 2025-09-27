@@ -76,9 +76,9 @@ func (p *Page) GetSegments() []Segment {
 
 		chunk := Segment{}
 
-		chunk.typ, ptr = unpack.Uint8(&data, ptr)
-		chunk.ln, ptr = unpack.Uint32(&data, ptr)
-		chunk.rem, ptr = unpack.Uint32(&data, ptr)
+		chunk.typ, ptr = unpack.Uint8(data, ptr)
+		chunk.ln, ptr = unpack.Uint32(data, ptr)
+		chunk.rem, ptr = unpack.Uint32(data, ptr)
 
 		if chunk.ln == 0 || int(chunk.ln)+ptr >= PageDataSize {
 			break
@@ -104,10 +104,10 @@ func (p *Page) FromBytes(b []byte) error {
 	// Header
 
 	// Type
-	p.typ, ptr = unpack.Uint16(&b, ptr)
+	p.typ, ptr = unpack.Uint16(b, ptr)
 
 	// Version
-	p.version, ptr = unpack.Uint16(&b, ptr)
+	p.version, ptr = unpack.Uint16(b, ptr)
 
 	// Data
 	copy(p.data[:], b[headerSize:PageSize-tailSize])
@@ -118,7 +118,7 @@ func (p *Page) FromBytes(b []byte) error {
 	// Tail
 
 	// Checksum
-	p.checksum, _ = unpack.Uint32(&b, PageSize-tailSize)
+	p.checksum, _ = unpack.Uint32(b, PageSize-tailSize)
 
 	cks := crc32.ChecksumIEEE(p.data[:])
 	if cks != p.checksum {
@@ -161,10 +161,10 @@ func (p *Page) Pack(b []byte) error {
 	// Header
 
 	// Type
-	ptr = pack.Uint16(p.typ, &b, ptr)
+	ptr = pack.Uint16(b, p.typ, ptr)
 
 	// Version
-	ptr = pack.Uint16(p.version, &b, ptr)
+	ptr = pack.Uint16(b, p.version, ptr)
 
 	// Data
 	copy(b[headerSize:headerSize+p.cur], p.data[:])
@@ -172,7 +172,7 @@ func (p *Page) Pack(b []byte) error {
 	// Tail
 
 	// Checksum
-	_ = pack.Uint32(p.checksum, &b, PageSize-tailSize)
+	_ = pack.Uint32(b, p.checksum, PageSize-tailSize)
 
 	return nil
 }
@@ -197,20 +197,20 @@ func (p *Page) Write(data []byte, remaining int32) (n int, err error) {
 	// Type of segment
 	switch remaining {
 	case -1:
-		ptr = pack.Uint8(1, &meta, ptr) // full data
+		ptr = pack.Uint8(meta, 1, ptr) // full data
 		remaining = 0
 	case 0:
-		ptr = pack.Uint8(2, &meta, ptr) // end segment
+		ptr = pack.Uint8(meta, 2, ptr) // end segment
 	default:
-		ptr = pack.Uint8(3, &meta, ptr) // middle segment
+		ptr = pack.Uint8(meta, 3, ptr) // middle segment
 	}
 
 	// Length of segment
 	ln := len(data)
-	ptr = pack.Uint32(uint32(ln), &meta, ptr)
+	ptr = pack.Uint32(meta, uint32(ln), ptr)
 
 	// Remaining length
-	ptr = pack.Uint32(uint32(remaining), &meta, ptr)
+	ptr = pack.Uint32(meta, uint32(remaining), ptr)
 
 	n = copy(p.data[p.cur:], meta)
 	p.cur += n
