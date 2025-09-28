@@ -10,39 +10,61 @@ const (
 )
 
 type Pager struct {
-	metaPage
+	meta *Meta
 
 	w          wal.WriterReaderSeekerCloser
-	lastPageID uint64
+	freePageID uint64
 }
 
 func NewPager(w wal.WriterReaderSeekerCloser, size uint64) (*Pager, error) {
-	return &Pager{
-		metaPage: newMetaPage(w, size),
-		w:        w,
+	pg := &Pager{
+		w: w,
 
-		lastPageID: size/pageSize - 1,
-	}, nil
+		freePageID: max(1, size/pageSize),
+	}
+	pg.InitMeta()
+
+	return pg, nil
+}
+
+func (pg *Pager) InitMeta() {
+	var metaPage *Meta
+
+	page, err := pg.Read(0)
+	if err != nil {
+		page = NewPage(0, 0, PageTypeMeta)
+		metaPage = page.Meta()
+		metaPage.Init()
+		pg.Write(page)
+	} else {
+		fmt.Printf("Loaded meta page with LSN %d\n", page.Meta().root)
+		metaPage = page.Meta()
+	}
+
+	pg.meta = metaPage
 }
 
 func (pg *Pager) Alloc(lsn uint64, typ uint16) *Page {
-	pg.lastPageID++
+	p := NewPage(pg.freePageID, lsn, typ)
 
-	return NewPage(pg.lastPageID, lsn, typ)
+	pg.freePageID++
+
+	return p
 }
 
 func (pg *Pager) Free(p *Page) error {
-	p.used = false
+	p.Free()
 
 	return pg.Write(p)
 }
 
 func (pg *Pager) ReadRoot() (*Page, error) {
-	if pg.rootPageOffset == 0 {
-		return pg.Alloc(pg.lsn, PageTypeLeaf), nil
+	pgm := pg.meta
+	if pgm.root == 0 {
+		return pg.Alloc(pg.meta.lsn, PageTypeLeaf), nil
 	}
 
-	return pg.Read(pg.rootPageOffset)
+	return pg.Read(pgm.root)
 }
 
 func (pg *Pager) WriteRoot(p *Page) error {
@@ -51,25 +73,13 @@ func (pg *Pager) WriteRoot(p *Page) error {
 		return err
 	}
 
-	pg.w.Seek(0, 0)
+	pg.meta.root = p.ID()
 
-	pg.rootPageOffset = p.id
-
-	buff := pg.Pack()
-	n, err := pg.w.Write(buff)
-	if err != nil {
-		return err
-	}
-
-	if n != metaPageSize {
-		return errShortWrite
-	}
-
-	return nil
+	return pg.Write(pg.meta.Page())
 }
 
 func (pg *Pager) Read(id uint64) (*Page, error) {
-	pg.w.Seek(int64(id*pageSize)+int64(pageSize), 0)
+	pg.w.Seek(int64(id*pageSize), 0)
 
 	buff := make([]byte, pageSize)
 	n, err := pg.w.Read(buff)
@@ -86,20 +96,17 @@ func (pg *Pager) Read(id uint64) (*Page, error) {
 		return nil, err
 	}
 
-	if !p.used {
+	if !p.Used() {
 		return nil, fmt.Errorf("page %d is not used", id)
 	}
-
-	p.id = id
 
 	return p, nil
 }
 
 func (pg *Pager) Write(p *Page) error {
-	pg.w.Seek(int64(p.id*pageSize)+int64(pageSize), 0)
+	pg.w.Seek(int64(p.ID()*pageSize), 0)
 
-	buff := p.Pack()
-	n, err := pg.w.Write(buff)
+	n, err := pg.w.Write(p.Pack())
 	if err != nil {
 		return err
 	}
