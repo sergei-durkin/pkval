@@ -44,11 +44,16 @@ func main() {
 	}
 
 	go func() {
+		var p *db.Page
 		for i := 0; i < 10; i++ {
-			p := pg.Alloc(505, db.PageTypeLeaf)
+			p = pg.Alloc(505, db.PageTypeLeaf)
 			fmt.Fprintf(p, "This is page %d\n", i)
 			pg.Write(p)
+
+			fmt.Printf("Allocated page %d with ID %d\n", i, p.ID())
 		}
+
+		pg.WriteRoot(p)
 
 		pg.Sync()
 	}()

@@ -3,21 +3,20 @@ package db
 import (
 	"fmt"
 	"unsafe"
-	"wal/internal/pack"
-	"wal/internal/unpack"
 )
 
 const (
 	pageSize = 1 << 13
 
-	headerSize   = int(unsafe.Sizeof(header{}))
+	headerSize   = unsafe.Sizeof(header{})
 	pageDataSize = pageSize - headerSize
 )
 
 const (
-	PageTypeLeaf     uint16 = 1
-	PageTypeNode     uint16 = 2
-	PageTypeOverflow uint16 = 3
+	PageTypeMeta     uint16 = 1
+	PageTypeLeaf     uint16 = 2
+	PageTypeNode     uint16 = 3
+	PageTypeOverflow uint16 = 4
 )
 
 type header struct {
@@ -26,13 +25,13 @@ type header struct {
 	typ  uint16
 	used bool
 
-	_ [48]byte // padding
+	_ [40]byte // padding
 }
 
-type Page struct {
-	header
+type Page [pageSize]byte
 
-	data [pageDataSize]byte
+func (p *Page) Header() *header {
+	return (*header)(unsafe.Pointer(p))
 }
 
 func NewPageFromBytes(b []byte) (*Page, error) {
@@ -40,59 +39,89 @@ func NewPageFromBytes(b []byte) (*Page, error) {
 		return nil, fmt.Errorf("invalid page size: %d", len(b))
 	}
 
-	p := &Page{}
+	var p Page
+	copy(p[:], b)
 
-	ptr := 0
-	p.id, ptr = unpack.Uint64(b, ptr)
-	p.lsn, ptr = unpack.Uint64(b, ptr)
-	p.typ, ptr = unpack.Uint16(b, ptr)
-
-	var used uint16
-	used, ptr = unpack.Uint16(b, ptr)
-	p.used = used != 0
-
-	copy(p.data[:], b[headerSize:])
-
-	return p, nil
+	return &p, nil
 }
 
 func NewPage(id uint64, lsn uint64, typ uint16) *Page {
-	return &Page{
-		header: header{
-			id:   id,
-			lsn:  lsn,
-			typ:  typ,
-			used: true,
-		},
-	}
+	var p Page
+
+	h := p.Header()
+	h.id = id
+	h.lsn = lsn
+	h.typ = typ
+	h.used = true
+
+	return &p
+}
+
+func (p *Page) Type() uint16 {
+	return p.Header().typ
+}
+
+func (p *Page) ID() uint64 {
+	return p.Header().id
+}
+
+func (p *Page) Used() bool {
+	return p.Header().used
+}
+
+func (p *Page) Free() {
+	p.Header().used = false
 }
 
 func (p *Page) Write(data []byte) (int, error) {
-	if len(data) > len(p.data) {
-		return 0, fmt.Errorf("data too large for page: %d > %d", len(data), len(p.data))
+	if len(data) > len(p) {
+		return 0, fmt.Errorf("data too large for page: %d > %d", len(data), len(p))
 	}
 
-	n := copy(p.data[:], data)
+	n := copy(p[headerSize:], data)
 
 	return n, nil
 }
 
 func (p *Page) Pack() []byte {
 	buff := make([]byte, pageSize)
-
-	ptr := 0
-	ptr = pack.Uint64(buff, p.id, ptr)
-	ptr = pack.Uint64(buff, p.lsn, ptr)
-	ptr = pack.Uint16(buff, p.typ, ptr)
-
-	var used uint16
-	if p.used {
-		used = 1
-	}
-
-	ptr = pack.Uint16(buff, used, ptr)
-
-	copy(buff[headerSize:], p.data[:])
+	copy(buff, p[:])
 
 	return buff
+}
+
+func (p *Page) Meta() *Meta {
+	h := p.Header()
+	if h.typ != PageTypeMeta {
+		panic(fmt.Sprintf("page is not a meta: %d", h.typ))
+	}
+
+	return (*Meta)(unsafe.Pointer(p))
+}
+
+func (p *Page) Node() *Node {
+	h := p.Header()
+	if h.typ != PageTypeNode {
+		panic(fmt.Sprintf("page is not a node: %d", h.typ))
+	}
+
+	return (*Node)(unsafe.Pointer(p))
+}
+
+func (p *Page) Leaf() *Leaf {
+	h := p.Header()
+	if h.typ != PageTypeLeaf {
+		panic(fmt.Sprintf("page is not a leaf: %d", h.typ))
+	}
+
+	return (*Leaf)(unsafe.Pointer(p))
+}
+
+func (p *Page) Overflow() *Overflow {
+	h := p.Header()
+	if h.typ != PageTypeOverflow {
+		panic(fmt.Sprintf("page is not an overflow: %d", h.typ))
+	}
+
+	return (*Overflow)(unsafe.Pointer(p))
 }
