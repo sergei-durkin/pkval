@@ -9,9 +9,14 @@ import (
 	"wal"
 	"wal/internal/cmd"
 	"wal/internal/db"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func main() {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	args := cmd.Parse(os.Args[1:])
 	for _, arg := range args {
 		if arg.Name == "help" || arg.Name == "h" {
@@ -20,7 +25,7 @@ func main() {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigchan := make(chan os.Signal, 1)
@@ -43,22 +48,24 @@ func main() {
 		panic(fmt.Sprintf("failed to create pager: %v", err))
 	}
 
-	go func() {
-		var p *db.Page
-		for i := 0; i < 10; i++ {
-			p = pg.Alloc(505, db.PageTypeLeaf)
-			fmt.Fprintf(p, "This is page %d\n", i)
-			pg.Write(p)
+	var p *db.Page
+	for i := 0; i < 10; i++ {
+		p = pg.Alloc(505, db.PageTypeLeaf)
+		fmt.Fprintf(p, "This is page %d\n", i)
+		pg.Write(p)
 
-			fmt.Printf("Allocated page %d with ID %d\n", i, p.ID())
-		}
+		fmt.Printf("Allocated page %d with ID %d\n", i, p.ID())
+	}
 
-		pg.WriteRoot(p)
+	pg.WriteRoot(p)
+	root, err := pg.ReadRoot()
+	if err != nil {
+		panic(fmt.Sprintf("failed to read root page: %v", err))
+	}
 
-		pg.Sync()
-	}()
+	fmt.Printf("Current root page ID: %d\n", root.ID())
 
-	<-ctx.Done()
+	pg.Sync()
 }
 
 func NewWriterReaderSeekerCloser(args []cmd.Arg) (wal.WriterReaderSeekerCloser, int64, error) {

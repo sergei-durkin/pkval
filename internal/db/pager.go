@@ -22,26 +22,24 @@ func NewPager(w wal.WriterReaderSeekerCloser, size uint64) (*Pager, error) {
 
 		freePageID: max(1, size/pageSize),
 	}
-	pg.InitMeta()
 
-	return pg, nil
-}
+	{ // Initialize meta page
+		var metaPage *Meta
 
-func (pg *Pager) InitMeta() {
-	var metaPage *Meta
+		page, err := pg.Read(0)
+		if err != nil {
+			page = NewPage(0, 0, PageTypeMeta)
+			metaPage = page.Meta()
+			metaPage.Init()
+			pg.Write(page)
+		} else {
+			metaPage = page.Meta()
+		}
 
-	page, err := pg.Read(0)
-	if err != nil {
-		page = NewPage(0, 0, PageTypeMeta)
-		metaPage = page.Meta()
-		metaPage.Init()
-		pg.Write(page)
-	} else {
-		fmt.Printf("Loaded meta page with LSN %d\n", page.Meta().root)
-		metaPage = page.Meta()
+		pg.meta = metaPage
 	}
 
-	pg.meta = metaPage
+	return pg, nil
 }
 
 func (pg *Pager) Alloc(lsn uint64, typ uint16) *Page {
@@ -84,7 +82,7 @@ func (pg *Pager) Read(id uint64) (*Page, error) {
 	buff := make([]byte, pageSize)
 	n, err := pg.w.Read(buff)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not read page %d: %w", id, err)
 	}
 
 	if n != pageSize {
@@ -93,7 +91,11 @@ func (pg *Pager) Read(id uint64) (*Page, error) {
 
 	p, err := NewPageFromBytes(buff)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not create page from bytes: %w", err)
+	}
+
+	if p.ID() != id {
+		return nil, fmt.Errorf("page id mismatch: expected %d, got %d", id, p.ID())
 	}
 
 	if !p.Used() {

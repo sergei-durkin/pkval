@@ -15,9 +15,14 @@ import (
 	"wal/internal/replay"
 	"wal/internal/resolver"
 	"wal/internal/storage"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func main() {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	args := cmd.Parse(os.Args[1:])
 	for _, arg := range args {
 		if arg.Name == "help" || arg.Name == "h" {

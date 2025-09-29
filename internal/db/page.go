@@ -19,11 +19,16 @@ const (
 	PageTypeOverflow uint16 = 4
 )
 
+const (
+	magicNumber uint16 = 0xABCD
+)
+
 type header struct {
-	id   uint64
-	lsn  uint64
-	typ  uint16
-	used bool
+	id    uint64
+	lsn   uint64
+	typ   uint16
+	magic uint16
+	used  bool
 
 	_ [40]byte // padding
 }
@@ -39,10 +44,12 @@ func NewPageFromBytes(b []byte) (*Page, error) {
 		return nil, fmt.Errorf("invalid page size: %d", len(b))
 	}
 
-	var p Page
-	copy(p[:], b)
+	p := (*Page)(unsafe.Pointer(&b[0]))
+	if p.Header().magic != magicNumber {
+		return nil, fmt.Errorf("invalid magic number: %x", p.Header().magic)
+	}
 
-	return &p, nil
+	return p, nil
 }
 
 func NewPage(id uint64, lsn uint64, typ uint16) *Page {
@@ -52,6 +59,7 @@ func NewPage(id uint64, lsn uint64, typ uint16) *Page {
 	h.id = id
 	h.lsn = lsn
 	h.typ = typ
+	h.magic = magicNumber
 	h.used = true
 
 	return &p
@@ -84,10 +92,7 @@ func (p *Page) Write(data []byte) (int, error) {
 }
 
 func (p *Page) Pack() []byte {
-	buff := make([]byte, pageSize)
-	copy(buff, p[:])
-
-	return buff
+	return p[:]
 }
 
 func (p *Page) Meta() *Meta {
