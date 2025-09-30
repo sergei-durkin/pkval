@@ -3,5 +3,6 @@ package db
 import "fmt"
 
 var (
-	errShortWrite = fmt.Errorf("short write")
+	errShortWrite     = fmt.Errorf("short write")
+	errNotEnoughSpace = fmt.Errorf("not enough space")
 )

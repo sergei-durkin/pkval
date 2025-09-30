@@ -48,10 +48,37 @@ func main() {
 		panic(fmt.Sprintf("failed to create pager: %v", err))
 	}
 
+	key := []byte("the_key")
+	entry := make([]byte, 1024)
+	for i := 0; i < len(entry); i++ {
+		entry[i] = byte(i%26) + 'a'
+	}
+	largeEntry := make([]byte, 7*1024)
+	for i := 0; i < len(largeEntry); i++ {
+		largeEntry[i] = byte(i%26) + 'a'
+	}
+
 	var p *db.Page
 	for i := 0; i < 10; i++ {
 		p = pg.Alloc(505, db.PageTypeLeaf)
 		fmt.Fprintf(p, "This is page %d\n", i)
+		p.Leaf().Insert([]byte("test"), []byte("pest"))
+		p.Leaf().Print(int(p.ID()))
+		pg.Write(p)
+
+		p, err = pg.Read(6)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		p.Leaf().Print(int(p.ID()))
+
+		err = p.Leaf().Insert(key, largeEntry)
+		if err != nil {
+			fmt.Println(fmt.Errorf("insert large entry failed: %w", err))
+			continue
+		}
+
 		pg.Write(p)
 
 		fmt.Printf("Allocated page %d with ID %d\n", i, p.ID())

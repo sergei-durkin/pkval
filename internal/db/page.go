@@ -12,11 +12,13 @@ const (
 	pageDataSize = pageSize - headerSize
 )
 
+type PageType uint16
+
 const (
-	PageTypeMeta     uint16 = 1
-	PageTypeLeaf     uint16 = 2
-	PageTypeNode     uint16 = 3
-	PageTypeOverflow uint16 = 4
+	PageTypeMeta     PageType = 1
+	PageTypeLeaf     PageType = 2
+	PageTypeNode     PageType = 3
+	PageTypeOverflow PageType = 4
 )
 
 const (
@@ -26,7 +28,7 @@ const (
 type header struct {
 	id    uint64
 	lsn   uint64
-	typ   uint16
+	typ   PageType
 	magic uint16
 	used  bool
 
@@ -52,9 +54,15 @@ func NewPageFromBytes(b []byte) (*Page, error) {
 	return p, nil
 }
 
-func NewPage(id uint64, lsn uint64, typ uint16) *Page {
+func NewPage(id uint64, lsn uint64, typ PageType) *Page {
 	var p Page
 
+	p.init(id, lsn, typ)
+
+	return &p
+}
+
+func (p *Page) init(id uint64, lsn uint64, typ PageType) {
 	h := p.Header()
 	h.id = id
 	h.lsn = lsn
@@ -62,10 +70,21 @@ func NewPage(id uint64, lsn uint64, typ uint16) *Page {
 	h.magic = magicNumber
 	h.used = true
 
-	return &p
+	switch typ {
+	default:
+		panic(fmt.Sprintf("unexpected page type: %d", typ))
+	case PageTypeMeta:
+		p.Meta().init()
+	case PageTypeLeaf:
+		p.Leaf().init()
+	case PageTypeNode:
+		// p.Node().init()
+	case PageTypeOverflow:
+		// p.Overflow().init()
+	}
 }
 
-func (p *Page) Type() uint16 {
+func (p *Page) Type() PageType {
 	return p.Header().typ
 }
 
@@ -86,13 +105,15 @@ func (p *Page) Write(data []byte) (int, error) {
 		return 0, fmt.Errorf("data too large for page: %d > %d", len(data), len(p))
 	}
 
-	n := copy(p[headerSize:], data)
-
-	return n, nil
+	return p.Leaf().Write(data)
 }
 
 func (p *Page) Pack() []byte {
 	return p[:]
+}
+
+func (p *Page) IsMeta() bool {
+	return p.Header().typ == PageTypeMeta
 }
 
 func (p *Page) Meta() *Meta {
@@ -104,6 +125,10 @@ func (p *Page) Meta() *Meta {
 	return (*Meta)(unsafe.Pointer(p))
 }
 
+func (p *Page) IsNode() bool {
+	return p.Header().typ == PageTypeNode
+}
+
 func (p *Page) Node() *Node {
 	h := p.Header()
 	if h.typ != PageTypeNode {
@@ -113,6 +138,10 @@ func (p *Page) Node() *Node {
 	return (*Node)(unsafe.Pointer(p))
 }
 
+func (p *Page) IsLeaf() bool {
+	return p.Header().typ == PageTypeLeaf
+}
+
 func (p *Page) Leaf() *Leaf {
 	h := p.Header()
 	if h.typ != PageTypeLeaf {
@@ -120,6 +149,10 @@ func (p *Page) Leaf() *Leaf {
 	}
 
 	return (*Leaf)(unsafe.Pointer(p))
+}
+
+func (p *Page) IsOverflow() bool {
+	return p.Header().typ == PageTypeOverflow
 }
 
 func (p *Page) Overflow() *Overflow {

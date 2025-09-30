@@ -24,25 +24,19 @@ func NewPager(w wal.WriterReaderSeekerCloser, size uint64) (*Pager, error) {
 	}
 
 	{ // Initialize meta page
-		var metaPage *Meta
-
 		page, err := pg.Read(0)
 		if err != nil {
 			page = NewPage(0, 0, PageTypeMeta)
-			metaPage = page.Meta()
-			metaPage.Init()
 			pg.Write(page)
-		} else {
-			metaPage = page.Meta()
 		}
 
-		pg.meta = metaPage
+		pg.meta = page.Meta()
 	}
 
 	return pg, nil
 }
 
-func (pg *Pager) Alloc(lsn uint64, typ uint16) *Page {
+func (pg *Pager) Alloc(lsn uint64, typ PageType) *Page {
 	p := NewPage(pg.freePageID, lsn, typ)
 
 	pg.freePageID++
