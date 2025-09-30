@@ -3,8 +3,8 @@ package storage
 import (
 	"hash/crc32"
 	"unsafe"
-	"wal/internal/pack"
-	"wal/internal/unpack"
+	"wal/internal/binary/pack"
+	"wal/internal/binary/unpack"
 )
 
 const (

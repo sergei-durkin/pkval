@@ -2,8 +2,8 @@ package log
 
 import (
 	"unsafe"
-	"wal/internal/pack"
-	"wal/internal/unpack"
+	"wal/internal/binary/pack"
+	"wal/internal/binary/unpack"
 )
 
 type EntryType uint8
