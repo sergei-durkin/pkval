@@ -3,8 +3,8 @@ package db
 import (
 	"fmt"
 	"unsafe"
-	"wal/internal/pack"
-	"wal/internal/unpack"
+	"wal/internal/binary/pack"
+	"wal/internal/binary/unpack"
 )
 
 const (
