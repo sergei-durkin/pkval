@@ -9,9 +9,14 @@ import (
 	"wal"
 	"wal/internal/cmd"
 	"wal/internal/db"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func main() {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	args := cmd.Parse(os.Args[1:])
 	for _, arg := range args {
 		if arg.Name == "help" || arg.Name == "h" {
@@ -20,7 +25,7 @@ func main() {
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sigchan := make(chan os.Signal, 1)
@@ -43,22 +48,51 @@ func main() {
 		panic(fmt.Sprintf("failed to create pager: %v", err))
 	}
 
-	go func() {
-		var p *db.Page
-		for i := 0; i < 10; i++ {
-			p = pg.Alloc(505, db.PageTypeLeaf)
-			fmt.Fprintf(p, "This is page %d\n", i)
-			pg.Write(p)
+	key := []byte("the_key")
+	entry := make([]byte, 1024)
+	for i := 0; i < len(entry); i++ {
+		entry[i] = byte(i%26) + 'a'
+	}
+	largeEntry := make([]byte, 7*1024)
+	for i := 0; i < len(largeEntry); i++ {
+		largeEntry[i] = byte(i%26) + 'a'
+	}
 
-			fmt.Printf("Allocated page %d with ID %d\n", i, p.ID())
+	var p *db.Page
+	for i := 0; i < 10; i++ {
+		p = pg.Alloc(505, db.PageTypeLeaf)
+		fmt.Fprintf(p, "This is page %d\n", i)
+		p.Leaf().Insert([]byte("test"), []byte("pest"))
+		p.Leaf().Print(int(p.ID()))
+		pg.Write(p)
+
+		p, err = pg.Read(6)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		p.Leaf().Print(int(p.ID()))
+
+		err = p.Leaf().Insert(key, largeEntry)
+		if err != nil {
+			fmt.Println(fmt.Errorf("insert large entry failed: %w", err))
+			continue
 		}
 
-		pg.WriteRoot(p)
+		pg.Write(p)
 
-		pg.Sync()
-	}()
+		fmt.Printf("Allocated page %d with ID %d\n", i, p.ID())
+	}
 
-	<-ctx.Done()
+	pg.WriteRoot(p)
+	root, err := pg.ReadRoot()
+	if err != nil {
+		panic(fmt.Sprintf("failed to read root page: %v", err))
+	}
+
+	fmt.Printf("Current root page ID: %d\n", root.ID())
+
+	pg.Sync()
 }
 
 func NewWriterReaderSeekerCloser(args []cmd.Arg) (wal.WriterReaderSeekerCloser, int64, error) {

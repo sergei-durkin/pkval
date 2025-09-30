@@ -5,14 +5,20 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 	"wal/internal/cmd"
 	"wal/internal/resolver"
 	"wal/internal/storage"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func main() {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	args := cmd.Parse(os.Args[1:])
 	for _, arg := range args {
 		if arg.Name == "help" || arg.Name == "h" {
@@ -34,7 +40,7 @@ func main() {
 		fmt.Println("\nShutting down...")
 	}()
 
-	syncInterval := 4 * time.Second
+	syncInterval := 1 * time.Second
 	w, err := storage.NewPageBuffer(ctx, syncInterval, resolver.NewWriter(args))
 
 	if err != nil {
@@ -60,7 +66,10 @@ func main() {
 		b100m[i] = byte(i%26) + 'a'
 	}
 
+	var wg sync.WaitGroup
+	wg.Add(3)
 	go func() {
+		defer wg.Done()
 		for i := 0; i < 10; i++ {
 			err := w.Write(b100)
 			if err != nil {
@@ -71,6 +80,7 @@ func main() {
 	}()
 
 	go func() {
+		defer wg.Done()
 		for i := 0; i < 10; i++ {
 			err := w.Write(b1m)
 			if err != nil {
@@ -81,6 +91,7 @@ func main() {
 	}()
 
 	go func() {
+		defer wg.Done()
 		for i := 0; i < 3; i++ {
 			err := w.Write(b100m)
 			if err != nil {
@@ -91,5 +102,7 @@ func main() {
 		}
 	}()
 
-	<-ctx.Done()
+	wg.Wait()
+
+	time.Sleep(1 * time.Second)
 }

@@ -19,7 +19,7 @@ func (m *Meta) Page() *Page {
 	return (*Page)(unsafe.Pointer(m))
 }
 
-func (m *Meta) Init() {
+func (m *Meta) init() {
 	m.version = DB_VERSION
 	m.root = 0
 	m.freeMap = 0
