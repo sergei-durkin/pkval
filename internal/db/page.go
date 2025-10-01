@@ -26,13 +26,17 @@ const (
 )
 
 type header struct {
-	id    uint64
-	lsn   uint64
+	id  uint64
+	lsn uint64
+
+	head uint32
+	tail uint32
+
 	typ   PageType
 	magic uint16
 	used  bool
 
-	_ [40]byte // padding
+	_ [32]byte // padding
 }
 
 type Page [pageSize]byte
@@ -66,6 +70,10 @@ func (p *Page) init(id uint64, lsn uint64, typ PageType) {
 	h := p.Header()
 	h.id = id
 	h.lsn = lsn
+
+	h.head = 0
+	h.tail = 0
+
 	h.typ = typ
 	h.magic = magicNumber
 	h.used = true

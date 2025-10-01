@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"wal"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 const (
@@ -71,6 +73,8 @@ func (pg *Pager) WriteRoot(p *Page) error {
 }
 
 func (pg *Pager) Read(id uint64) (*Page, error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	pg.w.Seek(int64(id*pageSize), 0)
 
 	buff := make([]byte, pageSize)
@@ -100,6 +104,8 @@ func (pg *Pager) Read(id uint64) (*Page, error) {
 }
 
 func (pg *Pager) Write(p *Page) error {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	pg.w.Seek(int64(p.ID()*pageSize), 0)
 
 	n, err := pg.w.Write(p.Pack())

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"wal"
 	"wal/internal/cmd"
@@ -59,11 +60,42 @@ func main() {
 	}
 
 	var p *db.Page
-	for i := 0; i < 10; i++ {
+	p = pg.Alloc(505, db.PageTypeNode)
+	p.Leaf().Insert([]byte("test"), []byte("pest"))
+	pg.Write(p)
+
+	for i := 0; i < 650; i++ {
+		p, err = pg.Read(1)
+		if err != nil {
+			panic(fmt.Errorf("cannot read first page %w", err))
+		}
+
+		k := db.Key(strconv.Itoa(i))
+
+		err = p.Leaf().Insert(k, []byte("test"))
+		if err != nil {
+			m := pg.Alloc(505, db.PageTypeLeaf)
+			beforeDst := m.Leaf().Len()
+			beforeSrc := p.Leaf().Len()
+			pivot := p.Leaf().MoveHalf(m.Leaf())
+
+			if k.Less(pivot) {
+				p.Leaf().Insert(k, []byte("test"))
+			} else {
+				m.Leaf().Insert(k, []byte("test"))
+			}
+
+			pg.Write(m)
+
+			fmt.Printf("Splitted page %d with ID %d and pivot %s. After len = [%d/%d], Before len = [%d/%d]\n", p.ID(), m.ID(), pivot, p.Leaf().Len(), m.Leaf().Len(), beforeSrc, beforeDst)
+		}
+
+		pg.Write(p)
+	}
+
+	for i := 0; i < 0; i++ {
 		p = pg.Alloc(505, db.PageTypeLeaf)
-		fmt.Fprintf(p, "This is page %d\n", i)
 		p.Leaf().Insert([]byte("test"), []byte("pest"))
-		p.Leaf().Print(int(p.ID()))
 		pg.Write(p)
 
 		p, err = pg.Read(6)
@@ -71,12 +103,15 @@ func main() {
 			fmt.Println(err)
 			continue
 		}
-		p.Leaf().Print(int(p.ID()))
 
-		err = p.Leaf().Insert(key, largeEntry)
+		err = p.Leaf().Insert(append(key, byte(i%9)+'0'), []byte("test splits"))
 		if err != nil {
-			fmt.Println(fmt.Errorf("insert large entry failed: %w", err))
-			continue
+			m := pg.Alloc(505, db.PageTypeLeaf)
+			beforeDst := m.Leaf().Len()
+			beforeSrc := p.Leaf().Len()
+			pivot := p.Leaf().MoveHalf(m.Leaf())
+			pg.Write(m)
+			fmt.Printf("Splitted page %d with ID %d and pivot %s. Src len = [%d/%d], Dst len = [%d/%d]\n", p.ID(), m.ID(), pivot, p.Leaf().Len(), m.Leaf().Len(), beforeSrc, beforeDst)
 		}
 
 		pg.Write(p)
