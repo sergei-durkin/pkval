@@ -49,63 +49,49 @@ func main() {
 		panic(fmt.Sprintf("failed to create pager: %v", err))
 	}
 
-	key := []byte("the_key")
-	entry := make([]byte, 1024)
-	for i := 0; i < len(entry); i++ {
-		entry[i] = byte(i%26) + 'a'
-	}
-	largeEntry := make([]byte, 7*1024)
-	for i := 0; i < len(largeEntry); i++ {
-		largeEntry[i] = byte(i%26) + 'a'
+	entry := make([]byte, 2048)
+	customEntry := make([]byte, 2048)
+	for i := range 2048 {
+		customEntry[i] = byte(i%26) + 'a'
 	}
 
-	var p *db.Page
-	p = pg.Alloc(505, db.PageTypeLeaf)
-	p.Leaf().Insert([]byte("test"), []byte("pest"))
-	pg.Write(p)
-
-	for i := 0; i < 1<<13; i++ {
-		p, err = pg.Read(1)
-		if err != nil {
-			panic(fmt.Errorf("cannot read first page %w", err))
+	t := db.NewTree(pg)
+	for i := 0; i < 10000; i++ {
+		if i == 9941 || i == 0 || i == 5555 || i == 9999 {
+			err = t.Insert(append([]byte("test_"), []byte(strconv.Itoa(i))...), customEntry)
+			if err != nil {
+				panic(err)
+			}
+			continue
 		}
 
-		k := append(db.Key(key), []byte(strconv.Itoa(i))...)
-		v := entry
-
-		err = p.Leaf().Insert(k, v)
+		err = t.Insert(append([]byte("test_"), []byte(strconv.Itoa(i))...), entry)
 		if err != nil {
-			m := pg.Alloc(505, db.PageTypeLeaf)
-			beforeDst := m.Leaf().Len()
-			beforeSrc := p.Leaf().Len()
-			pivot := p.Leaf().MoveHalf(m.Leaf())
-			if pivot == nil {
-				panic("cannot split page with only one key")
-			}
-
-			if k.Less(pivot) {
-				p.Leaf().Insert(k, []byte("test"))
-			} else {
-				m.Leaf().Insert(k, []byte("test"))
-			}
-
-			pg.Write(m)
-
-			fmt.Printf("Splitted page %d with ID %d and pivot %s. After len = [%d/%d], Before len = [%d/%d]\n", p.ID(), m.ID(), pivot, p.Leaf().Len(), m.Leaf().Len(), beforeSrc, beforeDst)
+			panic(err)
 		}
-
-		pg.Write(p)
 	}
-
-	pg.WriteRoot(p)
-	root, err := pg.ReadRoot()
-	if err != nil {
-		panic(fmt.Sprintf("failed to read root page: %v", err))
-	}
-
-	fmt.Printf("Current root page ID: %d\n", root.ID())
 
 	pg.Sync()
+
+	e, ok := t.Find([]byte("test_"))
+	fmt.Println(string(e), ok)
+
+	e, ok = t.Find([]byte("test_0"))
+	fmt.Println(string(e), ok)
+
+	e, ok = t.Find([]byte("test_5555"))
+	fmt.Println(string(e), ok)
+
+	e, ok = t.Find([]byte("test_9999"))
+	fmt.Println(string(e), ok)
+
+	k := []byte("test_9941")
+	e, ok = t.Find(k)
+	if !ok {
+		panic("not found")
+	}
+
+	fmt.Println(string(k), "\n", string(e))
 }
 
 func NewWriterReaderSeekerCloser(args []cmd.Arg) (wal.WriterReaderSeekerCloser, int64, error) {

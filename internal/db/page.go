@@ -86,7 +86,7 @@ func (p *Page) init(id uint64, lsn uint64, typ PageType) {
 	case PageTypeLeaf:
 		p.Leaf().init()
 	case PageTypeNode:
-		// p.Node().init()
+		p.Node().init()
 	case PageTypeOverflow:
 		// p.Overflow().init()
 	}
