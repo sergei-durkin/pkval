@@ -115,7 +115,7 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 
 	offsets := src.sortedOffsets()
 
-	mid := (len(offsets) + 1) / 2
+	mid := len(offsets) / 2
 	midOffset := offsets[mid]
 	midKey := src.keyByOffset(midOffset.key)
 	midEntry := src.entryByOffset(midOffset.entry)
