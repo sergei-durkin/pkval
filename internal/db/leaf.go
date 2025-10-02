@@ -65,6 +65,10 @@ func (l *Leaf) Len() int {
 func (l *Leaf) Insert(k Key, e Entry) (err error) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
+	if l.count >= maxDegree {
+		return errNotEnoughSpace
+	}
+
 	if len(k) > int(maxKeySize) {
 		panic("key too big")
 	}
@@ -144,7 +148,7 @@ func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
 		keyPtr = writeKey(data, midKey, keyPtr)
 		entryPtr = writeLeafEntry(data, midEntry, entryPtr)
 
-		pivot = data[keyPtr-len(k) : keyPtr]
+		pivot = data[keyPtr-len(midKey) : keyPtr]
 
 		for i := mid + 1; i < len(offsets); i++ {
 			o := offsets[i]
@@ -254,18 +258,13 @@ func writeKey(dst []byte, src []byte, ptr int) int {
 	return ptr
 }
 
-func (l *Leaf) Print(level int) {
+func (l *Leaf) Print(level []byte) {
 	offsets := l.sortedOffsets()
-
-	lvl := make([]byte, level)
-	for i := 0; i < level; i++ {
-		lvl[i] = '\t'
-	}
 
 	for _, o := range offsets {
 		k := string(l.data[o.key.offset : o.key.offset+o.key.len])
 		e := string(l.data[o.entry.offset : o.entry.offset+o.entry.len])
-		fmt.Printf("%skey: %s, entry: %s\n", lvl, k, e)
+		fmt.Printf("%skey: %s, entry: %s\n", level, k, e)
 	}
 
 }

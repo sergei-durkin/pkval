@@ -6,11 +6,28 @@ import (
 )
 
 const (
-	pageSize = 1 << 13
+	pageSize  = 1 << 13
+	maxDegree = 1 << 4
 
 	headerSize   = unsafe.Sizeof(header{})
 	pageDataSize = pageSize - headerSize
 )
+
+func init() {
+	if maxDegree < 3 {
+		panic(fmt.Errorf("maxDegree should be >= 3, actual %d", maxDegree))
+	}
+
+	p := len(Page{})
+	l := len((&Leaf{}).Page())
+	n := len((&Node{}).Page())
+	o := len(Overflow{})
+	m := len((&Meta{}).Page())
+
+	if p != l || p != n || p != o || p != m {
+		panic(fmt.Errorf("Pages has inconsistent sizes: Page = %d, Leaf = %d, Node = %d, Overflow = %d, Meta = %d", p, l, n, o, m))
+	}
+}
 
 type PageType uint16
 

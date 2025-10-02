@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"os"
 )
 
 type Tree struct {
@@ -134,7 +135,7 @@ func (t *Tree) Print() error {
 		}
 	}
 
-	level := 0
+	level := []byte{}
 	q := []*Page{t.root}
 	for len(q) > 0 {
 		ln := len(q)
@@ -143,15 +144,19 @@ func (t *Tree) Print() error {
 			q = q[1:]
 
 			if p.IsLeaf() {
+				fmt.Fprintf(os.Stderr, "Leaf [%d]: \n", p.Leaf().id)
 				p.Leaf().Print(level)
 
+				fmt.Fprint(os.Stderr, "\n")
 				continue
 			}
 
 			if p.IsNode() {
+				fmt.Fprintf(os.Stderr, "Node [%d]: \n", p.Node().id)
 				next := p.Node().Entries()
 
 				for i := 0; i < len(next); i++ {
+					fmt.Fprintf(os.Stderr, "%s %d ", level, next[i])
 					r, err := t.pager.Read(next[i])
 					if err != nil {
 						return fmt.Errorf("failed to read page: %w", err)
@@ -159,9 +164,10 @@ func (t *Tree) Print() error {
 
 					q = append(q, r)
 				}
+				fmt.Fprint(os.Stderr, "\n\n")
 			}
 		}
-		level++
+		level = append(level, ' ')
 	}
 
 	return nil

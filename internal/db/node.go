@@ -68,6 +68,10 @@ func (n *Node) Find(k Key) (next uint64, ok bool) {
 func (n *Node) Insert(k Key, e uint64) (err error) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
+	if n.count >= maxDegree {
+		return errNotEnoughSpace
+	}
+
 	keyPtr := int(n.head)
 	entryPtr := int(len(n.data)) - int(n.tail)
 

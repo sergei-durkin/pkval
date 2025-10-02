@@ -50,14 +50,15 @@ func main() {
 	}
 
 	entry := make([]byte, 2048)
+	copy(entry, []byte("test"))
 	customEntry := make([]byte, 2048)
 	for i := range 2048 {
 		customEntry[i] = byte(i%26) + 'a'
 	}
 
 	t := db.NewTree(pg)
-	for i := 0; i < 10000; i++ {
-		if i == 9941 || i == 0 || i == 5555 || i == 9999 {
+	for i := 0; i < 1000; i++ {
+		if i == 941 || i == 0 || i == 5555 || i == 9999 {
 			err = t.Insert(append([]byte("test_"), []byte(strconv.Itoa(i))...), customEntry)
 			if err != nil {
 				panic(err)
@@ -72,6 +73,7 @@ func main() {
 	}
 
 	pg.Sync()
+	t.Print()
 
 	e, ok := t.Find([]byte("test_"))
 	fmt.Println(string(e), ok)
@@ -85,7 +87,7 @@ func main() {
 	e, ok = t.Find([]byte("test_9999"))
 	fmt.Println(string(e), ok)
 
-	k := []byte("test_9941")
+	k := []byte("test_941")
 	e, ok = t.Find(k)
 	if !ok {
 		panic("not found")
