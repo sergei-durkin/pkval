@@ -123,9 +123,12 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 	cmp := k.Compare(midKey)
 	lt, gt, eq := cmp == -1, cmp == 1, cmp == 0
 
+	updated := false
+
 	{ // if mid == key then update entry with new val
 		if eq {
 			midEntry = e
+			updated = true
 		}
 
 		pivot = append([]byte{}, midKey...)
@@ -143,12 +146,20 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 		for i := mid + 1; i < len(offsets); i++ {
 			o := offsets[i]
 
+			okey := src.keyByOffset(o.key)
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
-			entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
+
+			if okey.Compare(k) == 0 {
+				updated = true
+				entryPtr = writeNodeEntry(data, e, entryPtr)
+			} else {
+				entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
+			}
+
 			dst.count++
 		}
 
-		if gt {
+		if !updated && gt {
 			keyPtr = writeKey(data, k, keyPtr)
 			entryPtr = writeNodeEntry(data, e, entryPtr)
 			dst.count++
@@ -166,12 +177,20 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 		for i := 0; i < mid; i++ {
 			o := offsets[i]
 
+			okey := src.keyByOffset(o.key)
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
-			entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
+
+			if okey.Compare(k) == 0 {
+				updated = true
+				entryPtr = writeNodeEntry(data, e, entryPtr)
+			} else {
+				entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
+			}
+
 			src.count++
 		}
 
-		if lt {
+		if !updated && lt {
 			keyPtr = writeKey(data, k, keyPtr)
 			entryPtr = writeNodeEntry(data, e, entryPtr)
 			src.count++
