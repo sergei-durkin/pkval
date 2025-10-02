@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"sort"
 	"unsafe"
 	"wal/internal/binary/pack"
@@ -10,10 +11,20 @@ import (
 )
 
 const (
+	leafDataSize = pageDataSize - 3*unsafe.Sizeof(int64(0))
+
 	keyLenSize   = unsafe.Sizeof(uint16(0))
 	entryLenSize = unsafe.Sizeof(uint32(0))
-	leafDataSize = pageDataSize - 3*unsafe.Sizeof(int64(0))
+
+	maxKeySize   = 1 << 10
+	maxEntrySize = (leafDataSize-2*entryLenSize)/2 - (maxKeySize + keyLenSize)
 )
+
+func init() {
+	if maxEntrySize <= 0 {
+		panic("page size too small")
+	}
+}
 
 type Leaf struct {
 	header
@@ -35,7 +46,15 @@ func (l *Leaf) Page() *Page {
 }
 
 func (l *Leaf) Find(k Key) (e Entry, found bool) {
-	// TODO: implement
+	offsets := l.offsets()
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		if k.Compare(l.keyByOffset(o.key)) == 0 {
+			return l.entryByOffset(o.entry), true
+		}
+	}
+
 	return Entry{}, false
 }
 
@@ -46,26 +65,31 @@ func (l *Leaf) Len() int {
 func (l *Leaf) Insert(k Key, e Entry) (err error) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
+	if len(k) > int(maxKeySize) {
+		panic("key too big")
+	}
+
+	if len(e) > int(maxEntrySize) {
+		panic("entry too big")
+	}
+
 	keyPtr := int(l.head)
 	entryPtr := int(leafDataSize) - int(l.tail)
 
 	keySize := len(k) + int(keyLenSize)
 	entrySize := len(e) + int(entryLenSize)
 
-	if keyPtr+keySize >= entryPtr-entrySize {
+	h, t := l.head+uint32(keySize), l.tail+uint32(entrySize)
+
+	if h+t > uint32(leafDataSize) {
 		return errNotEnoughSpace
 	}
 
-	l.head += uint32(keySize)
-	l.tail += uint32(entrySize)
+	l.head = h
+	l.tail = t
 
 	keyPtr = writeKey(l.data[:], k, keyPtr)
-
-	entryPtr -= int(entryLenSize)
-	pack.Uint32(l.data[entryPtr:], uint32(len(e)), 0)
-
-	entryPtr -= len(e)
-	copy(l.data[entryPtr:entryPtr+len(e)], e)
+	entryPtr = writeLeafEntry(l.data[:], e, entryPtr)
 
 	l.count++
 	return nil
@@ -79,7 +103,7 @@ func (l *Leaf) Write(data []byte) (n int, err error) {
 	return copy(l.data[:], data), nil
 }
 
-func (src *Leaf) MoveHalf(dst *Leaf) (pivot Key) {
+func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
 	if dst.count != 0 {
@@ -87,33 +111,54 @@ func (src *Leaf) MoveHalf(dst *Leaf) (pivot Key) {
 	}
 
 	if src.count == 1 {
-		return nil
+		panic("inconsistent leaf page")
 	}
 
-	// anyLess->src->anyGreater => anyLess->src->dst->anyGreater
+	// anyLess<->src<->anyGreater => anyLess<->src<->dst<->anyGreater
 	dst.right = src.right
 	src.right = dst.id
+	dst.left = src.id
 
 	offsets := src.sortedOffsets()
-	mid := (len(offsets) + 1) / 2
 
-	src.count = uint64(mid)
-	dst.count = uint64(len(offsets)) - src.count - 1
+	mid := (len(offsets) + 1) / 2
+	midOffset := offsets[mid]
+	midKey := src.keyByOffset(midOffset.key)
+	midEntry := src.entryByOffset(midOffset.entry)
+
+	cmp := k.Compare(midKey)
+	lt, gt, eq := cmp == -1, cmp == 1, cmp == 0
+	if eq {
+		midEntry = e
+	}
+
+	src.count = 0
+	dst.count = 1 // mid entry
 
 	{ // offsets[mid:len(offsets)) dst keys
 		keyPtr := 0
 		entryPtr := int(leafDataSize)
 
 		data := dst.data[:]
-		for i := mid; i < len(offsets); i++ {
+
+		keyPtr = writeKey(data, midKey, keyPtr)
+		entryPtr = writeLeafEntry(data, midEntry, entryPtr)
+
+		pivot = data[keyPtr-len(k) : keyPtr]
+
+		for i := mid + 1; i < len(offsets); i++ {
 			o := offsets[i]
 
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
-			entryPtr = writeEntry(data, src.entryByOffset(o.entry), entryPtr)
+			entryPtr = writeLeafEntry(data, src.entryByOffset(o.entry), entryPtr)
+			dst.count++
+		}
 
-			if i == mid {
-				pivot = data[keyPtr-o.key.len : keyPtr]
-			}
+		// insert
+		if gt {
+			keyPtr = writeKey(data, k, keyPtr)
+			entryPtr = writeLeafEntry(data, e, entryPtr)
+			dst.count++
 		}
 
 		dst.head = uint32(keyPtr)
@@ -129,7 +174,15 @@ func (src *Leaf) MoveHalf(dst *Leaf) (pivot Key) {
 			o := offsets[i]
 
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
-			entryPtr = writeEntry(data, src.entryByOffset(o.entry), entryPtr)
+			entryPtr = writeLeafEntry(data, src.entryByOffset(o.entry), entryPtr)
+			src.count++
+		}
+
+		// insert
+		if lt {
+			keyPtr = writeKey(data, k, keyPtr)
+			entryPtr = writeLeafEntry(data, e, entryPtr)
+			src.count++
 		}
 
 		copy(src.data[:], data)
@@ -201,7 +254,22 @@ func writeKey(dst []byte, src []byte, ptr int) int {
 	return ptr
 }
 
-func writeEntry(dst, src []byte, ptr int) int {
+func (l *Leaf) Print(level int) {
+	offsets := l.sortedOffsets()
+
+	lvl := make([]byte, level)
+	for i := 0; i < level; i++ {
+		lvl[i] = '\t'
+	}
+
+	for _, o := range offsets {
+		k := string(l.data[o.key.offset : o.key.offset+o.key.len])
+		e := string(l.data[o.entry.offset : o.entry.offset+o.entry.len])
+		fmt.Printf("%skey: %s, entry: %s\n", lvl, k, e)
+	}
+
+}
+func writeLeafEntry(dst, src []byte, ptr int) int {
 	ln := len(src)
 
 	ptr -= int(entryLenSize)
