@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"os"
+	"wal/internal/binary/pack"
+	"wal/internal/binary/unpack"
 )
 
 type Tree struct {
@@ -18,6 +20,71 @@ func NewTree(pg *Pager) *Tree {
 
 type Key []byte
 type Entry []byte
+
+type entryType uint8
+
+const (
+	entryTypeData     entryType = 1
+	entryTypeOverflow entryType = 2
+)
+
+func NewOverflowEntry(next uint64) (e Entry) {
+	e = make([]byte, 9)
+	_ = pack.Uint64(e, next, 1)
+
+	e[0] = byte(entryTypeOverflow)
+
+	return e
+}
+
+func NewDataEntry(data []byte) (e Entry) {
+	e = make([]byte, len(data)+1)
+	copy(e[1:], data)
+
+	e[0] = byte(entryTypeData)
+
+	return e
+}
+
+func (e *Entry) GetData() []byte {
+	t := e.Type()
+	if t != entryTypeData {
+		panic(fmt.Sprintf("entry is not a data: %d", t))
+	}
+
+	return (*e)[1:]
+}
+
+func (e *Entry) GetNext() uint64 {
+	t := e.Type()
+	if t != entryTypeOverflow {
+		panic(fmt.Sprintf("entry is not a overflow: %d", t))
+	}
+
+	res, _ := unpack.Uint64((*e)[1:], 0)
+
+	return res
+}
+
+func (e *Entry) IsData() bool {
+	return e.Type() == entryTypeData
+}
+
+func (e *Entry) IsOverflow() bool {
+	return e.Type() == entryTypeOverflow
+}
+
+func (e *Entry) Type() entryType {
+	return entryType((*e)[0])
+}
+
+func (e *Entry) Format() string {
+	if e.IsData() {
+		return string(e.GetData())
+	}
+
+	return fmt.Sprintf("overflow:%d", e.GetNext())
+}
 
 func (k Key) Valid() bool {
 	return len(k) <= int(maxKeySize)
@@ -49,7 +116,7 @@ func (k Key) Less(other Key) bool {
 	return k.Compare(other) < 0
 }
 
-func (t *Tree) Insert(k Key, e Entry) error {
+func (t *Tree) Insert(k Key, v []byte) error {
 	var err error
 
 	if t.root == nil {
@@ -77,6 +144,37 @@ func (t *Tree) Insert(k Key, e Entry) error {
 
 	if p == nil {
 		return fmt.Errorf("failed to find leaf")
+	}
+
+	var e Entry
+	if len(v)+1 > int(maxEntrySize) {
+		o := t.pager.Alloc(p.Header().lsn, PageTypeOverflow)
+		firstID := o.ID()
+
+		for len(v) > 0 {
+			n, err := o.Overflow().Write(v)
+			if err != nil {
+				return fmt.Errorf("failed to write into overflow page: %w", err)
+			}
+
+			if n == len(v) {
+				t.pager.Write(o)
+				break
+			}
+
+			v = v[n:]
+
+			next := t.pager.Alloc(p.Header().lsn, PageTypeOverflow)
+			o.Overflow().next = next.ID()
+			t.pager.Write(o)
+
+			o = next
+		}
+
+		e = NewOverflowEntry(firstID)
+	} else {
+		// add entry type byte
+		e = NewDataEntry(v)
 	}
 
 	err = p.Leaf().Insert(k, e)
@@ -125,6 +223,74 @@ func (t *Tree) Insert(k Key, e Entry) error {
 	return nil
 }
 
+func (t *Tree) Find(k Key) (e Entry, found bool) {
+	var err error
+
+	r := t.root
+	if r == nil {
+		r, err = t.pager.ReadRoot()
+		if err != nil {
+			fmt.Println(fmt.Errorf("failed to read root: %w", err))
+
+			return Entry{}, false
+		}
+	}
+
+	for r != nil {
+		if r.IsLeaf() {
+			e, found = r.Leaf().Find(k)
+			if !found {
+				return Entry{}, false
+			}
+
+			if e.IsData() {
+				return e[1:], true
+			}
+
+			if e.IsOverflow() {
+				overflow := make([]byte, 0, maxEntrySize)
+
+				next := e.GetNext()
+				for next > 0 {
+					op, err := t.pager.Read(next)
+					if err != nil {
+						fmt.Println(fmt.Errorf("failed to read overflow page: %w", err))
+
+						return Entry{}, false
+					}
+
+					next = op.Overflow().next
+					overflow = append(overflow, op.Overflow().Data()...)
+				}
+
+				return overflow, true
+			}
+
+			panic("unknown entry type")
+		}
+
+		if r.IsNode() {
+			next, ok := r.Node().Find(k)
+			if !ok {
+				return Entry{}, false
+			}
+
+			r, err = t.pager.Read(next)
+			if err != nil {
+				fmt.Println(fmt.Errorf("failed to read page: %w", err))
+
+				return Entry{}, false
+			}
+
+			continue
+		}
+
+		panic(fmt.Errorf("unexpected page type: %d", r.Type()))
+	}
+
+	return Entry{}, false
+}
+
 func (t *Tree) Print() error {
 	var err error
 
@@ -171,44 +337,4 @@ func (t *Tree) Print() error {
 	}
 
 	return nil
-}
-
-func (t *Tree) Find(k Key) (e Entry, found bool) {
-	var err error
-
-	r := t.root
-	if r == nil {
-		r, err = t.pager.ReadRoot()
-		if err != nil {
-			fmt.Println(fmt.Errorf("failed to read root: %w", err))
-
-			return Entry{}, false
-		}
-	}
-
-	for r != nil {
-		if r.IsLeaf() {
-			return r.Leaf().Find(k)
-		}
-
-		if r.IsNode() {
-			next, ok := r.Node().Find(k)
-			if !ok {
-				return Entry{}, false
-			}
-
-			r, err = t.pager.Read(next)
-			if err != nil {
-				fmt.Println(fmt.Errorf("failed to read page: %w", err))
-
-				return Entry{}, false
-			}
-
-			continue
-		}
-
-		panic(fmt.Errorf("unexpected page type: %d", r.Type()))
-	}
-
-	return Entry{}, false
 }

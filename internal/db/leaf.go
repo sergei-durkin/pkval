@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"unsafe"
 	"wal/internal/binary/pack"
@@ -263,8 +264,9 @@ func (l *Leaf) Print(level []byte) {
 
 	for _, o := range offsets {
 		k := string(l.data[o.key.offset : o.key.offset+o.key.len])
-		e := string(l.data[o.entry.offset : o.entry.offset+o.entry.len])
-		fmt.Printf("%skey: %s, entry: %s\n", level, k, e)
+		e := Entry(l.data[o.entry.offset : o.entry.offset+o.entry.len])
+
+		fmt.Fprintf(os.Stderr, "%s key: %s, entry: %s\n", level, k, e.Format())
 	}
 
 }

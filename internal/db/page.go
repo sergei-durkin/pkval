@@ -21,7 +21,7 @@ func init() {
 	p := len(Page{})
 	l := len((&Leaf{}).Page())
 	n := len((&Node{}).Page())
-	o := len(Overflow{})
+	o := len((&Overflow{}).Page())
 	m := len((&Meta{}).Page())
 
 	if p != l || p != n || p != o || p != m {
