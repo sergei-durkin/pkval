@@ -38,7 +38,7 @@ func TestTree(t *testing.T) {
 	}
 
 	if !entryEq(e, entry) {
-		t.Fatal("e and entry not equal")
+		t.Fatalf("e and entry not equal: %v != %v", e, entry)
 	}
 
 	for i := range 16 {
@@ -59,6 +59,41 @@ func TestTree(t *testing.T) {
 		if !entryEq(expected, e) {
 			t.Fatalf("entry of %q not equal: %q != %q", k, e, expected)
 		}
+	}
+}
+
+func TestTreeOverflow(t *testing.T) {
+	writer, size, err := NewWriterReaderSeekerCloser()
+	if err != nil {
+		panic(fmt.Sprintf("failed to create writer: %v", err))
+	}
+	defer ClearDB()
+	defer writer.Close()
+
+	pg, err := NewPager(writer, uint64(size))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create pager: %v", err))
+	}
+
+	const entrySize = 1 << 22 // 4Mb
+
+	key := []byte("the_key")
+	entry := make([]byte, entrySize)
+	for i := range entrySize {
+		entry[i] = byte(i%26) + 'a'
+	}
+
+	tree := NewTree(pg)
+	tree.Insert(key, entry)
+	tree.Print()
+
+	e, ok := tree.Find(key)
+	if !ok {
+		t.Fatalf("key %q not found", key)
+	}
+
+	if !entryEq(e, entry) {
+		t.Fatal("e and entry not equal")
 	}
 }
 
