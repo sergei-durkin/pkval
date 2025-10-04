@@ -47,7 +47,7 @@ func (n *Node) Entries() []uint64 {
 	return res
 }
 
-func (n *Node) Find(k Key) (next uint64, ok bool) {
+func (n *Node) Find(k Key) (next uint64, found bool) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
 	prev := n.less

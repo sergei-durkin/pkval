@@ -32,9 +32,9 @@ func TestTree(t *testing.T) {
 	tree := NewTree(pg)
 	tree.Insert(key, entry)
 
-	e, ok := tree.Find(key)
-	if !ok {
-		t.Fatalf("key %q not found", key)
+	e, err := tree.Find(key)
+	if err != nil {
+		t.Fatalf("key %q not found: %s", key, err.Error())
 	}
 
 	if !entryEq(e, entry) {
@@ -51,9 +51,9 @@ func TestTree(t *testing.T) {
 
 	for i := range 16 {
 		k, expected := append(key, []byte(strconv.Itoa(i))...), append(entry, []byte(strconv.Itoa(i))...)
-		e, ok = tree.Find(k)
-		if !ok {
-			t.Fatalf("key %q not found", k)
+		e, err = tree.Find(k)
+		if err != nil {
+			t.Fatalf("key %q not found: %s", k, err.Error())
 		}
 
 		if !entryEq(expected, e) {
@@ -85,11 +85,10 @@ func TestTreeOverflow(t *testing.T) {
 
 	tree := NewTree(pg)
 	tree.Insert(key, entry)
-	tree.Print()
 
-	e, ok := tree.Find(key)
-	if !ok {
-		t.Fatalf("key %q not found", key)
+	e, err := tree.Find(key)
+	if err != nil {
+		t.Fatalf("key %q not found: %s", key, err.Error())
 	}
 
 	if !entryEq(e, entry) {
