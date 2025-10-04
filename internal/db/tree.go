@@ -3,8 +3,6 @@ package db
 import (
 	"fmt"
 	"os"
-	"wal/internal/binary/pack"
-	"wal/internal/binary/unpack"
 )
 
 type Tree struct {
@@ -18,114 +16,43 @@ func NewTree(pg *Pager) *Tree {
 	}
 }
 
-type Key []byte
-type Entry []byte
-
-type entryType uint8
-
-const (
-	entryTypeData     entryType = 1
-	entryTypeOverflow entryType = 2
-)
-
-func NewOverflowEntry(next uint64) (e Entry) {
-	e = make([]byte, 9)
-	_ = pack.Uint64(e, next, 1)
-
-	e[0] = byte(entryTypeOverflow)
-
-	return e
-}
-
-func NewDataEntry(data []byte) (e Entry) {
-	e = make([]byte, len(data)+1)
-	copy(e[1:], data)
-
-	e[0] = byte(entryTypeData)
-
-	return e
-}
-
-func (e *Entry) GetData() []byte {
-	t := e.Type()
-	if t != entryTypeData {
-		panic(fmt.Sprintf("entry is not a data: %d", t))
-	}
-
-	return (*e)[1:]
-}
-
-func (e *Entry) GetNext() uint64 {
-	t := e.Type()
-	if t != entryTypeOverflow {
-		panic(fmt.Sprintf("entry is not a overflow: %d", t))
-	}
-
-	res, _ := unpack.Uint64((*e)[1:], 0)
-
-	return res
-}
-
-func (e *Entry) IsData() bool {
-	return e.Type() == entryTypeData
-}
-
-func (e *Entry) IsOverflow() bool {
-	return e.Type() == entryTypeOverflow
-}
-
-func (e *Entry) Type() entryType {
-	return entryType((*e)[0])
-}
-
-func (e *Entry) Format() string {
-	if e.IsData() {
-		return string(e.GetData())
-	}
-
-	return fmt.Sprintf("overflow:%d", e.GetNext())
-}
-
-func (k Key) Valid() bool {
-	return len(k) <= int(maxKeySize)
-}
-
-func (k Key) Compare(other Key) int {
-	if len(k) != len(other) {
-		if len(k) < len(other) {
-			return -1
-		} else {
-			return 1
-		}
-	}
-
-	for i := 0; i < len(k); i++ {
-		if k[i] != other[i] {
-			if k[i] < other[i] {
-				return -1
-			} else {
-				return 1
-			}
-		}
-	}
-
-	return 0
-}
-
-func (k Key) Less(other Key) bool {
-	return k.Compare(other) < 0
-}
-
-func (t *Tree) Insert(k Key, v []byte) error {
+func (t *Tree) Root() (*Page, error) {
 	var err error
 
 	if t.root == nil {
 		t.root, err = t.pager.ReadRoot()
 		if err != nil {
-			return fmt.Errorf("failed to read root: %w", err)
+			return nil, fmt.Errorf("failed to read root: %w", err)
 		}
 	}
-	p := t.root
+
+	return t.root, nil
+}
+
+func (t *Tree) Insert(k Key, v []byte) error {
+	oldRoot, err := t.Root()
+	if err != nil {
+		return fmt.Errorf("failed to get root: %w", err)
+	}
+
+	newRoot, newPages, err := t.insert(k, v)
+	if err != nil {
+		return fmt.Errorf("insertion failed: %w", err)
+	}
+
+	for i := 0; i < len(newPages); i++ {
+		t.pager.Write(newPages[i])
+	}
+
+	if newRoot != nil && oldRoot != newRoot {
+		t.pager.WriteRoot(newRoot)
+	}
+
+	return nil
+}
+
+func (t *Tree) insert(k Key, v []byte) (*Page, []*Page, error) {
+	p, err := t.Root()
 
 	path := []*Page{}
 	for p.IsNode() {
@@ -133,78 +60,61 @@ func (t *Tree) Insert(k Key, v []byte) error {
 
 		next, ok := p.Node().Find(k)
 		if !ok {
-			return fmt.Errorf("failed to find leaf")
+			return nil, nil, fmt.Errorf("failed to find leaf")
 		}
 
 		p, err = t.pager.Read(next)
 		if err != nil {
-			return fmt.Errorf("failed to read next")
+			return nil, nil, fmt.Errorf("failed to read next")
 		}
 	}
 
 	if p == nil {
-		return fmt.Errorf("failed to find leaf")
+		return nil, nil, fmt.Errorf("failed to find leaf")
 	}
 
-	var e Entry
+	var (
+		pages []*Page
+		e     Entry
+	)
+
 	if len(v)+1 > int(maxEntrySize) {
-		o := t.pager.Alloc(p.Header().lsn, PageTypeOverflow)
-		firstID := o.ID()
-
-		for len(v) > 0 {
-			n, err := o.Overflow().Write(v)
-			if err != nil {
-				return fmt.Errorf("failed to write into overflow page: %w", err)
-			}
-
-			if n == len(v) {
-				t.pager.Write(o)
-				break
-			}
-
-			v = v[n:]
-
-			next := t.pager.Alloc(p.Header().lsn, PageTypeOverflow)
-			o.Overflow().next = next.ID()
-			t.pager.Write(o)
-
-			o = next
+		pages, err = t.writeOverflow(p.Header().lsn, v)
+		if err != nil {
+			return nil, nil, err
 		}
 
-		e = NewOverflowEntry(firstID)
+		e = NewOverflowEntry(pages[0].ID())
 	} else {
-		// add entry type byte
 		e = NewDataEntry(v)
 	}
 
 	err = p.Leaf().Insert(k, e)
 	if nil == err {
-		t.pager.Write(p)
-		return nil
+		return t.root, append(pages, p), nil
 	}
 
 	extra := t.pager.Alloc(p.Header().lsn, PageTypeLeaf)
 	pivot := p.Leaf().MoveAndPlace(extra.Leaf(), k, e)
 
-	t.pager.Write(p)
-	t.pager.Write(extra)
+	pages = append(pages, p)
+	pages = append(pages, extra)
 
 	for len(path) > 0 {
 		next := extra.ID()
-		par := path[len(path)-1]
+		parent := path[len(path)-1]
 		path = path[:len(path)-1]
 
-		err = par.Node().Insert(pivot, next)
+		err = parent.Node().Insert(pivot, next)
 		if nil == err {
-			t.pager.Write(par)
-			return nil
+			return nil, append(pages, parent), nil
 		}
 
 		extra = t.pager.Alloc(0, PageTypeNode)
-		pivot = par.Node().MoveAndPlace(extra.Node(), pivot, next)
+		pivot = parent.Node().MoveAndPlace(extra.Node(), pivot, next)
 
-		t.pager.Write(par)
-		t.pager.Write(extra)
+		pages = append(pages, parent)
+		pages = append(pages, extra)
 	}
 
 	{ // split root
@@ -212,97 +122,74 @@ func (t *Tree) Insert(k Key, v []byte) error {
 		r.Node().less = t.root.ID()
 		err = r.Node().Insert(pivot, extra.ID())
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 
 		t.root = r
-
-		t.pager.WriteRoot(r)
 	}
 
-	return nil
+	return t.root, pages, nil
 }
 
-func (t *Tree) Find(k Key) (e Entry, found bool) {
-	var err error
-
-	r := t.root
-	if r == nil {
-		r, err = t.pager.ReadRoot()
-		if err != nil {
-			fmt.Println(fmt.Errorf("failed to read root: %w", err))
-
-			return Entry{}, false
-		}
+func (t *Tree) Find(k Key) (e Entry, err error) {
+	p, err := t.Root()
+	if err != nil {
+		return nil, err
 	}
 
-	for r != nil {
-		if r.IsLeaf() {
-			e, found = r.Leaf().Find(k)
-			if !found {
-				return Entry{}, false
+	for p != nil {
+		if p.IsLeaf() {
+			e = p.Leaf().Find(k)
+			if e == nil {
+				return nil, errNotFound
 			}
 
 			if e.IsData() {
-				return e[1:], true
+				return e[1:], nil
 			}
 
 			if e.IsOverflow() {
-				overflow := make([]byte, 0, maxEntrySize)
-
 				next := e.GetNext()
-				for next > 0 {
-					op, err := t.pager.Read(next)
-					if err != nil {
-						fmt.Println(fmt.Errorf("failed to read overflow page: %w", err))
 
-						return Entry{}, false
-					}
-
-					next = op.Overflow().next
-					overflow = append(overflow, op.Overflow().Data()...)
+				e, err = t.readOverflow(next)
+				if err != nil {
+					return nil, fmt.Errorf("read overflow page %d failed: %w", next, err)
 				}
 
-				return overflow, true
+				return e, nil
 			}
 
 			panic("unknown entry type")
 		}
 
-		if r.IsNode() {
-			next, ok := r.Node().Find(k)
+		if p.IsNode() {
+			next, ok := p.Node().Find(k)
 			if !ok {
-				return Entry{}, false
+				return nil, errNotFound
 			}
 
-			r, err = t.pager.Read(next)
+			p, err = t.pager.Read(next)
 			if err != nil {
-				fmt.Println(fmt.Errorf("failed to read page: %w", err))
-
-				return Entry{}, false
+				return nil, fmt.Errorf("failed to read page: %w", err)
 			}
 
 			continue
 		}
 
-		panic(fmt.Errorf("unexpected page type: %d", r.Type()))
+		panic(fmt.Errorf("unexpected page type: %d", p.Type()))
 	}
 
-	return Entry{}, false
+	return nil, errNotFound
 }
 
 func (t *Tree) Print() error {
-	var err error
-
-	if t.root == nil {
-		t.root, err = t.pager.ReadRoot()
-		if err != nil {
-			return fmt.Errorf("failed to read root: %w", err)
-		}
+	root, err := t.Root()
+	if err != nil {
+		return err
 	}
 
 	level := []byte{}
-	q := []*Page{t.root}
+	q := []*Page{root}
 	for len(q) > 0 {
 		ln := len(q)
 		for range ln {
@@ -320,9 +207,9 @@ func (t *Tree) Print() error {
 			if p.IsNode() {
 				fmt.Fprintf(os.Stderr, "Node [%d]: \n", p.Node().id)
 				next := p.Node().Entries()
-
 				for i := 0; i < len(next); i++ {
 					fmt.Fprintf(os.Stderr, "%s %d ", level, next[i])
+
 					r, err := t.pager.Read(next[i])
 					if err != nil {
 						return fmt.Errorf("failed to read page: %w", err)
@@ -330,11 +217,57 @@ func (t *Tree) Print() error {
 
 					q = append(q, r)
 				}
+
 				fmt.Fprint(os.Stderr, "\n\n")
+				continue
 			}
 		}
+
 		level = append(level, ' ')
 	}
 
 	return nil
+}
+
+func (t *Tree) readOverflow(next uint64) (e Entry, err error) {
+	overflow := make([]byte, 0, maxEntrySize)
+
+	for next > 0 {
+		op, err := t.pager.Read(next)
+		if err != nil {
+			return Entry{}, fmt.Errorf("failed to read overflow page: %w", err)
+		}
+
+		next = op.Overflow().next
+		overflow = append(overflow, op.Overflow().Data()...)
+	}
+
+	return overflow, nil
+}
+
+func (t *Tree) writeOverflow(lsn uint64, v []byte) (chain []*Page, err error) {
+	chain = make([]*Page, 0, len(v)/int(maxEntrySize))
+
+	p := t.pager.Alloc(lsn, PageTypeOverflow)
+	for len(v) > 0 {
+		chain = append(chain, p)
+
+		n, err := p.Overflow().Write(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to write entry to overflow page: %w", err)
+		}
+
+		if n == len(v) {
+			break
+		}
+
+		v = v[n:]
+
+		next := t.pager.Alloc(lsn, PageTypeOverflow)
+		p.Overflow().next = next.ID()
+
+		p = next
+	}
+
+	return chain, nil
 }

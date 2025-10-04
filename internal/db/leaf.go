@@ -46,17 +46,17 @@ func (l *Leaf) Page() *Page {
 	return (*Page)(unsafe.Pointer(l))
 }
 
-func (l *Leaf) Find(k Key) (e Entry, found bool) {
+func (l *Leaf) Find(k Key) (e Entry) {
 	offsets := l.offsets()
 	for i := 0; i < len(offsets); i++ {
 		o := offsets[i]
 
 		if k.Compare(l.keyByOffset(o.key)) == 0 {
-			return l.entryByOffset(o.entry), true
+			return l.entryByOffset(o.entry)
 		}
 	}
 
-	return Entry{}, false
+	return nil
 }
 
 func (l *Leaf) Len() int {
@@ -270,6 +270,7 @@ func (l *Leaf) Print(level []byte) {
 	}
 
 }
+
 func writeLeafEntry(dst, src []byte, ptr int) int {
 	ln := len(src)
 

@@ -49,10 +49,13 @@ func main() {
 		panic(fmt.Sprintf("failed to create pager: %v", err))
 	}
 
-	entry := make([]byte, 2048)
+	const entrySize = 1 << 20
+
+	entry := make([]byte, entrySize)
 	copy(entry, []byte("test"))
-	customEntry := make([]byte, 2048)
-	for i := range 2048 {
+
+	customEntry := make([]byte, entrySize)
+	for i := range entrySize {
 		customEntry[i] = byte(i%26) + 'a'
 	}
 
@@ -88,9 +91,9 @@ func main() {
 	fmt.Println(string(e), ok)
 
 	k := []byte("test_941")
-	e, ok = t.Find(k)
-	if !ok {
-		panic("not found")
+	e, err = t.Find(k)
+	if err != nil {
+		panic(err)
 	}
 
 	fmt.Println(string(k), "\n", string(e))
