@@ -4,9 +4,14 @@ import (
 	"fmt"
 	"testing"
 	"unsafe"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func TestNodeInsert(t *testing.T) {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	p := NewPage(5, 5, PageTypeNode)
 
 	if !p.IsNode() {
@@ -55,6 +60,9 @@ func TestNodeInsert(t *testing.T) {
 }
 
 func TestNodeMoveAndPlace(t *testing.T) {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	src := NewPage(5, 5, PageTypeNode)
 
 	k := []byte("key")
@@ -159,6 +167,9 @@ func TestNodeMoveAndPlace(t *testing.T) {
 }
 
 func TestNodeMoveAndPlaceEq(t *testing.T) {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	src := NewPage(5, 5, PageTypeNode)
 
 	k := []byte("key")

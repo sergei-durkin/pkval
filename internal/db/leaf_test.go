@@ -3,9 +3,14 @@ package db
 import (
 	"fmt"
 	"testing"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func TestLeafInsert(t *testing.T) {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	p := NewPage(5, 5, PageTypeLeaf)
 
 	if !p.IsLeaf() {
@@ -54,6 +59,9 @@ func TestLeafInsert(t *testing.T) {
 }
 
 func TestLeafMoveAndPlace(t *testing.T) {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	src := NewPage(5, 5, PageTypeLeaf)
 	src.Leaf().right = 100500
 	src.Leaf().left = 200600
@@ -173,6 +181,9 @@ func TestLeafMoveAndPlace(t *testing.T) {
 }
 
 func TestLeafMoveAndPlaceEq(t *testing.T) {
+	armtracer.Begin()
+	defer armtracer.End()
+
 	src := NewPage(5, 5, PageTypeLeaf)
 	src.Leaf().right = 100500
 	src.Leaf().left = 200600

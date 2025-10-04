@@ -2,4 +2,4 @@ module wal
 
 go 1.24.0
 
-require github.com/sergei-durkin/armtracer v0.0.0-20250929144053-5b7ba1861b04
+require github.com/sergei-durkin/armtracer v0.0.0-20251004233256-49a3dc697c31

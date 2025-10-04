@@ -11,4 +11,4 @@ run-replay:
 	rm ./tmp/*.log | go run -tags=armtracer ./cmd/replay/main.go --logdir ./tmp --logprefix wal --logfile ./tmp/wal
 
 test:
-	go test ./internal/db/... -v -count=4 -race
+	go test ./internal/db/... -v -count=4 -race -tags=armtracer
