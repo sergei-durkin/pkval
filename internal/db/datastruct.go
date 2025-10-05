@@ -1,9 +1,12 @@
 package db
 
 import (
+	"bytes"
 	"fmt"
 	"wal/internal/binary/pack"
 	"wal/internal/binary/unpack"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 type Key []byte
@@ -78,7 +81,9 @@ func (k Key) Valid() bool {
 	return len(k) <= int(maxKeySize)
 }
 
-func (k Key) Compare(other Key) int {
+func (k Key) Compare(other Key) (res int) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	if len(k) != len(other) {
 		if len(k) < len(other) {
 			return -1
@@ -87,19 +92,11 @@ func (k Key) Compare(other Key) int {
 		}
 	}
 
-	for i := 0; i < len(k); i++ {
-		if k[i] != other[i] {
-			if k[i] < other[i] {
-				return -1
-			} else {
-				return 1
-			}
-		}
-	}
-
-	return 0
+	return bytes.Compare(k, other)
 }
 
 func (k Key) Less(other Key) bool {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	return k.Compare(other) < 0
 }

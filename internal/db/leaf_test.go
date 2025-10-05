@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestLeafInsert(t *testing.T) {
 	}
 
 	actualEntry := p.Leaf().entryByOffset(o.entry)
-	if !entryEq(actualEntry, e) {
+	if !bytes.Equal(actualEntry, e) {
 		t.Fatal("entries should be equal")
 	}
 
@@ -138,7 +139,7 @@ func TestLeafMoveAndPlace(t *testing.T) {
 	}
 
 	srcFirstEntry := src.Leaf().entryByOffset(o1.entry)
-	if !entryEq(srcFirstEntry, e) {
+	if !bytes.Equal(srcFirstEntry, e) {
 		t.Fatalf("first entry of src page should be equal with e: %q != %q", e, srcFirstEntry)
 	}
 
@@ -149,7 +150,7 @@ func TestLeafMoveAndPlace(t *testing.T) {
 	}
 
 	srcSecondEntry := src.Leaf().entryByOffset(o3.entry)
-	if !entryEq(srcSecondEntry, e3) {
+	if !bytes.Equal(srcSecondEntry, e3) {
 		t.Fatalf("second entry of src page should be equal with e3: %q != %q", e3, srcFirstEntry)
 	}
 
@@ -159,7 +160,7 @@ func TestLeafMoveAndPlace(t *testing.T) {
 	}
 
 	dstEntry := dst.Leaf().entryByOffset(o2.entry)
-	if !entryEq(dstEntry, e2) {
+	if !bytes.Equal(dstEntry, e2) {
 		t.Fatalf("first entry of dst page should be equal with e2: %q != %q", e2, dstEntry)
 	}
 
@@ -258,7 +259,7 @@ func TestLeafMoveAndPlaceEq(t *testing.T) {
 	}
 
 	srcFirstEntry := src.Leaf().entryByOffset(o1.entry)
-	if !entryEq(srcFirstEntry, e) {
+	if !bytes.Equal(srcFirstEntry, e) {
 		t.Fatalf("first entry of src page should be equal with e: %q != %q", e, srcFirstEntry)
 	}
 
@@ -269,7 +270,7 @@ func TestLeafMoveAndPlaceEq(t *testing.T) {
 	}
 
 	srcSecondEntry := src.Leaf().entryByOffset(o3.entry)
-	if !entryEq(srcSecondEntry, e3) {
+	if !bytes.Equal(srcSecondEntry, e3) {
 		t.Fatalf("second entry of src page should be equal with e3: %q != %q", e3, srcFirstEntry)
 	}
 
@@ -279,7 +280,7 @@ func TestLeafMoveAndPlaceEq(t *testing.T) {
 	}
 
 	dstEntry := dst.Leaf().entryByOffset(o2.entry)
-	if !entryEq(dstEntry, e4) {
+	if !bytes.Equal(dstEntry, e4) {
 		t.Fatalf("first entry of dst page should be equal with e4: %q != %q", e4, dstEntry)
 	}
 
@@ -298,18 +299,4 @@ func TestLeafMoveAndPlaceEq(t *testing.T) {
 	if src.Leaf().right != 6 {
 		t.Fatalf("right src neighbor should be dst: %d != %d", src.Leaf().right, 6)
 	}
-}
-
-func entryEq(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for i := 0; i < len(a); i++ {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-
-	return true
 }
