@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
@@ -43,7 +44,7 @@ func TestTree(t *testing.T) {
 		t.Fatalf("key %q not found: %s", key, err.Error())
 	}
 
-	if !entryEq(e, entry) {
+	if !bytes.Equal(e, entry) {
 		t.Fatalf("e and entry not equal: %v != %v", e, entry)
 	}
 
@@ -62,7 +63,7 @@ func TestTree(t *testing.T) {
 			t.Fatalf("key %q not found: %s", k, err.Error())
 		}
 
-		if !entryEq(expected, e) {
+		if !bytes.Equal(expected, e) {
 			t.Fatalf("entry of %q not equal: %q != %q", k, e, expected)
 		}
 	}
@@ -100,7 +101,7 @@ func TestTreeOverflow(t *testing.T) {
 		t.Fatalf("key %q not found: %s", key, err.Error())
 	}
 
-	if !entryEq(e, entry) {
+	if !bytes.Equal(e, entry) {
 		t.Fatal("e and entry not equal")
 	}
 }
@@ -147,7 +148,7 @@ func TestTreeGen(t *testing.T) {
 			t.Fatalf("key %q not found: %s", r.k, err.Error())
 		}
 
-		if !entryEq(r.e, e) {
+		if !bytes.Equal(r.e, e) {
 			t.Fatalf("entry of %q not equal: %q != %q", r.k, e, r.e)
 		}
 	}

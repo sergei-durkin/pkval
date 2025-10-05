@@ -2,11 +2,16 @@ package wal_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 	"wal/internal/cmd"
+	"wal/internal/db"
+	"wal/internal/db/writer"
 	"wal/internal/resolver"
 	"wal/internal/storage"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 func BenchmarkWritePageBuffer(b *testing.B) {
@@ -29,4 +34,34 @@ func BenchmarkWritePageBuffer(b *testing.B) {
 			b.Error("failed to write to PageBuffer:", err)
 		}
 	}
+}
+
+func BenchmarkTree(b *testing.B) {
+	armtracer.Begin()
+	defer armtracer.End()
+
+	pg, err := db.NewPager(writer.NewInmemory(), 0)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create pager: %v", err))
+	}
+
+	const entrySize = 1 << 8
+
+	entry := make([]byte, entrySize)
+	copy(entry, []byte("test"))
+
+	customEntry := make([]byte, entrySize)
+	for i := range entrySize {
+		customEntry[i] = byte(i%26) + 'a'
+	}
+
+	t := db.NewTree(pg)
+	for i := 0; i < b.N; i++ {
+		err = t.Insert([]byte(fmt.Sprintf("test_%d", i)), entry)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	pg.Sync()
 }
