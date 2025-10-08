@@ -6,4 +6,5 @@ var (
 	errShortWrite     = fmt.Errorf("short write")
 	errNotEnoughSpace = fmt.Errorf("not enough space")
 	errNotFound       = fmt.Errorf("not found")
+	errAlreadyExists  = fmt.Errorf("key already exists")
 )

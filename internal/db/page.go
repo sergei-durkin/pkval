@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"unsafe"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 const (
@@ -134,6 +136,8 @@ func (p *Page) Write(data []byte) (int, error) {
 }
 
 func (p *Page) Pack() []byte {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	return p[:]
 }
 

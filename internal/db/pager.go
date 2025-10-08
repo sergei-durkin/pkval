@@ -121,5 +121,7 @@ func (pg *Pager) Write(p *Page) error {
 }
 
 func (pg *Pager) Sync() error {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	return pg.w.Sync()
 }
