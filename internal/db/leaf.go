@@ -33,7 +33,7 @@ type Leaf struct {
 	left, right uint64
 	count       uint64
 
-	// | keys count 4b | [len | key] | .... | [value | len] |
+	// | l,r,count | [len | key] | .... | [value | len] |
 	data [leafDataSize]byte
 }
 
@@ -47,16 +47,29 @@ func (l *Leaf) Page() *Page {
 }
 
 func (l *Leaf) Find(k Key) (e Entry) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	o, ok := l.find(k)
+	if !ok {
+		return nil
+	}
+
+	return l.entryByOffset(o.entry)
+}
+
+func (l *Leaf) find(k Key) (o dataOffset, ok bool) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	offsets := l.offsets()
 	for i := 0; i < len(offsets); i++ {
 		o := offsets[i]
 
 		if k.Compare(l.keyByOffset(o.key)) == 0 {
-			return l.entryByOffset(o.entry)
+			return o, true
 		}
 	}
 
-	return nil
+	return dataOffset{}, false
 }
 
 func (l *Leaf) Len() int {
@@ -81,13 +94,16 @@ func (l *Leaf) Insert(k Key, e Entry) (err error) {
 	keyPtr := int(l.head)
 	entryPtr := int(leafDataSize) - int(l.tail)
 
-	keySize := len(k) + int(keyLenSize)
-	entrySize := len(e) + int(entryLenSize)
+	var h, t uint32
+	{ // check overflow
+		keySize := len(k) + int(keyLenSize)
+		entrySize := len(e) + int(entryLenSize)
 
-	h, t := l.head+uint32(keySize), l.tail+uint32(entrySize)
+		h, t = l.head+uint32(keySize), l.tail+uint32(entrySize)
 
-	if h+t > uint32(leafDataSize) {
-		return errNotEnoughSpace
+		if h+t > uint32(leafDataSize) {
+			return errNotEnoughSpace
+		}
 	}
 
 	l.head = h
@@ -97,6 +113,66 @@ func (l *Leaf) Insert(k Key, e Entry) (err error) {
 	entryPtr = writeLeafEntry(l.data[:], e, entryPtr)
 
 	l.count++
+	return nil
+}
+
+func (l *Leaf) Update(k Key, e Entry) (err error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	if len(e) > int(maxEntrySize) {
+		panic("entry too big")
+	}
+
+	var (
+		offset dataOffset
+		ok     bool
+	)
+
+	offsets := l.offsets()
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		if k.Compare(l.keyByOffset(o.key)) == 0 {
+			offset = offsets[i]
+			ok = true
+
+			// remove key
+			offsets[i], offsets[len(offsets)-1] = offsets[len(offsets)-1], offsets[i]
+			offsets = offsets[:len(offsets)-1]
+
+			break
+		}
+	}
+	if !ok {
+		return errNotFound
+	}
+
+	{ // check overflow
+		tail := l.tail - uint32(offset.entry.len)
+		tail = l.tail + uint32(len(e))
+
+		if l.head+tail > uint32(leafDataSize) {
+			return errNotEnoughSpace
+		}
+	}
+
+	data := make([]byte, leafDataSize)
+
+	// write as new entry
+	keyPtr := writeKey(data, k, 0)
+	entryPtr := writeLeafEntry(data, e, int(leafDataSize))
+
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		keyPtr = writeKey(data, l.keyByOffset(o.key), keyPtr)
+		entryPtr = writeLeafEntry(data, l.entryByOffset(o.entry), entryPtr)
+	}
+
+	copy(l.data[:], data)
+
+	l.tail = uint32(leafDataSize) - uint32(entryPtr)
+
 	return nil
 }
 
@@ -134,6 +210,7 @@ func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
 	cmp := k.Compare(midKey)
 	lt, gt, eq := cmp == -1, cmp == 1, cmp == 0
 	if eq {
+		// update entry
 		midEntry = e
 	}
 

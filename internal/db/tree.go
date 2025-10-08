@@ -3,6 +3,8 @@ package db
 import (
 	"fmt"
 	"os"
+
+	"github.com/sergei-durkin/armtracer"
 )
 
 type Tree struct {
@@ -30,12 +32,14 @@ func (t *Tree) Root() (*Page, error) {
 }
 
 func (t *Tree) Insert(k Key, v []byte) error {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	oldRoot, err := t.Root()
 	if err != nil {
 		return fmt.Errorf("failed to get root: %w", err)
 	}
 
-	newRoot, newPages, err := t.insert(k, v)
+	newRoot, newPages, err := t.upsert(k, v, false)
 	if err != nil {
 		return fmt.Errorf("insertion failed: %w", err)
 	}
@@ -51,7 +55,33 @@ func (t *Tree) Insert(k Key, v []byte) error {
 	return nil
 }
 
-func (t *Tree) insert(k Key, v []byte) (*Page, []*Page, error) {
+func (t *Tree) Update(k Key, v []byte) error {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	oldRoot, err := t.Root()
+	if err != nil {
+		return fmt.Errorf("failed to get root: %w", err)
+	}
+
+	newRoot, newPages, err := t.upsert(k, v, true)
+	if err != nil {
+		return fmt.Errorf("insertion failed: %w", err)
+	}
+
+	for i := 0; i < len(newPages); i++ {
+		t.pager.Write(newPages[i])
+	}
+
+	if newRoot != nil && oldRoot != newRoot {
+		t.pager.WriteRoot(newRoot)
+	}
+
+	return nil
+}
+
+func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	p, err := t.Root()
 
 	path := []*Page{}
@@ -87,6 +117,18 @@ func (t *Tree) insert(k Key, v []byte) (*Page, []*Page, error) {
 		e = NewOverflowEntry(pages[0].ID())
 	} else {
 		e = NewDataEntry(v)
+	}
+
+	existsEntry := p.Leaf().Find(k)
+	if existsEntry != nil {
+		if !upsert {
+			return nil, nil, errAlreadyExists
+		}
+
+		err = p.Leaf().Update(k, e)
+		if nil == err {
+			return t.root, append(pages, p), nil
+		}
 	}
 
 	err = p.Leaf().Insert(k, e)

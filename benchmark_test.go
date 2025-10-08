@@ -65,3 +65,49 @@ func BenchmarkTree(b *testing.B) {
 
 	pg.Sync()
 }
+
+func BenchmarkLeafFind(b *testing.B) {
+	armtracer.Begin()
+	defer armtracer.End()
+
+	pg, err := db.NewPager(writer.NewInmemory(), 0)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create pager: %v", err))
+	}
+
+	entry := []byte{'0'}
+	page := pg.Alloc(0, db.PageTypeLeaf)
+	leaf := page.Leaf()
+
+	for i := 0; i < 256; i++ {
+		_ = leaf.Insert([]byte(fmt.Sprintf("%d", i)), entry)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = leaf.Find([]byte("255"))
+	}
+}
+
+func BenchmarkLeafInsert(b *testing.B) {
+	armtracer.Begin()
+	defer armtracer.End()
+
+	pg, err := db.NewPager(writer.NewInmemory(), 0)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create pager: %v", err))
+	}
+
+	entry := []byte{'0'}
+	page := pg.Alloc(0, db.PageTypeLeaf)
+	leaf := page.Leaf()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err = leaf.Insert([]byte(fmt.Sprintf("%d", i)), entry)
+		if err != nil {
+			page = pg.Alloc(0, db.PageTypeLeaf)
+			leaf = page.Leaf()
+		}
+	}
+}
