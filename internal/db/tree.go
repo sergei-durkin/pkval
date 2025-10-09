@@ -79,34 +79,99 @@ func (t *Tree) Update(k Key, v []byte) error {
 	return nil
 }
 
-func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
+func (t *Tree) Delete(k Key) error {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
-	p, err := t.Root()
-
-	path := []*Page{}
-	for p.IsNode() {
-		path = append(path, p)
-
-		next, ok := p.Node().Find(k)
-		if !ok {
-			return nil, nil, fmt.Errorf("failed to find leaf")
-		}
-
-		p, err = t.pager.Read(next)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to read next")
-		}
+	oldRoot, err := t.Root()
+	if err != nil {
+		return fmt.Errorf("failed to get root: %w", err)
 	}
 
+	newRoot, newPages, err := t.delete(k)
+	if err != nil {
+		return fmt.Errorf("insertion failed: %w", err)
+	}
+
+	for i := 0; i < len(newPages); i++ {
+		t.pager.Write(newPages[i])
+	}
+
+	if newRoot != nil && oldRoot != newRoot {
+		t.pager.WriteRoot(newRoot)
+	}
+
+	return nil
+}
+
+func (t *Tree) delete(k Key) (*Page, []*Page, error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	var (
+		pages []*Page
+	)
+
+	p, path, err := t.findLeaf(k)
 	if p == nil {
 		return nil, nil, fmt.Errorf("failed to find leaf")
 	}
 
+	existsEntry := p.Leaf().Find(k)
+	if existsEntry == nil {
+		return nil, nil, errNotFound
+	}
+
+	err = p.Leaf().Delete(k)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to delete key: %w", err)
+	}
+
+	if p.Leaf().Len() != 0 {
+		pages = append(pages, p)
+		return t.root, pages, nil
+	}
+
+	p.Free()
+	pages = append(pages, p)
+
+	next := p.ID()
+	for len(path) > 0 {
+		parent := path[len(path)-1]
+		path = path[:len(path)-1]
+
+		err = parent.Node().DeleteByChildID(next)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to delete child from parent: %w", err)
+		}
+
+		if parent.Node().Len() != 0 {
+			return nil, append(pages, parent), nil
+		}
+
+		next = parent.ID()
+		parent.Free()
+		pages = append(pages, parent)
+	}
+
+	{ // remove until root
+		t.root = t.pager.Alloc(0, PageTypeLeaf)
+	}
+
+	return t.root, pages, nil
+}
+
+func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
 	var (
-		pages []*Page
+		err   error
 		e     Entry
+		pages []*Page
 	)
+
+	p, path, err := t.findLeaf(k)
+	if p == nil {
+		return nil, nil, fmt.Errorf("failed to find leaf")
+	}
 
 	if len(v)+1 > int(maxEntrySize) {
 		pages, err = t.writeOverflow(p.Header().lsn, v)
@@ -126,12 +191,9 @@ func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
 		}
 
 		err = p.Leaf().Update(k, e)
-		if nil == err {
-			return t.root, append(pages, p), nil
-		}
+	} else {
+		err = p.Leaf().Insert(k, e)
 	}
-
-	err = p.Leaf().Insert(k, e)
 	if nil == err {
 		return t.root, append(pages, p), nil
 	}
@@ -171,6 +233,35 @@ func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
 	}
 
 	return t.root, pages, nil
+}
+
+func (t *Tree) findLeaf(k Key) (p *Page, path []*Page, err error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	p, err = t.Root()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get root: %w", err)
+	}
+
+	for p.IsNode() {
+		path = append(path, p)
+
+		next, ok := p.Node().Find(k)
+		if !ok {
+			return nil, nil, fmt.Errorf("failed to find leaf")
+		}
+
+		p, err = t.pager.Read(next)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read next")
+		}
+	}
+
+	if p == nil {
+		return nil, nil, fmt.Errorf("failed to find leaf")
+	}
+
+	return p, path, err
 }
 
 func (t *Tree) Find(k Key) (e Entry, err error) {

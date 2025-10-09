@@ -65,6 +65,41 @@ func (n *Node) Find(k Key) (next uint64, found bool) {
 	return prev, prev > 0
 }
 
+func (n *Node) DeleteByChildID(e uint64) (err error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	offsets := n.offsets()
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		if e == n.entryByOffset(o.entry) {
+			// remove key
+			offsets[i], offsets[len(offsets)-1] = offsets[len(offsets)-1], offsets[i]
+			offsets = offsets[:len(offsets)-1]
+		}
+	}
+
+	data := make([]byte, nodeDataSize)
+
+	keyPtr := 0
+	entryPtr := int(nodeDataSize)
+
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		keyPtr = writeKey(data, n.keyByOffset(o.key), keyPtr)
+		entryPtr = writeNodeEntry(data, n.entryByOffset(o.entry), entryPtr)
+	}
+
+	copy(n.data[:], data)
+
+	n.head = uint32(keyPtr)
+	n.tail = uint32(nodeDataSize) - uint32(entryPtr)
+
+	n.count--
+	return nil
+}
+
 func (n *Node) Insert(k Key, e uint64) (err error) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 

@@ -176,6 +176,50 @@ func (l *Leaf) Update(k Key, e Entry) (err error) {
 	return nil
 }
 
+func (l *Leaf) Delete(k Key) (err error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	var ok bool
+
+	offsets := l.offsets()
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		if k.Compare(l.keyByOffset(o.key)) == 0 {
+			ok = true
+
+			// remove key
+			offsets[i], offsets[len(offsets)-1] = offsets[len(offsets)-1], offsets[i]
+			offsets = offsets[:len(offsets)-1]
+
+			break
+		}
+	}
+	if !ok {
+		return errNotFound
+	}
+
+	data := make([]byte, leafDataSize)
+
+	keyPtr := 0
+	entryPtr := int(leafDataSize)
+
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		keyPtr = writeKey(data, l.keyByOffset(o.key), keyPtr)
+		entryPtr = writeLeafEntry(data, l.entryByOffset(o.entry), entryPtr)
+	}
+
+	copy(l.data[:], data)
+
+	l.head = uint32(keyPtr)
+	l.tail = uint32(leafDataSize) - uint32(entryPtr)
+
+	l.count--
+	return nil
+}
+
 func (l *Leaf) Write(data []byte) (n int, err error) {
 	if len(data) > len(l.data) {
 		return 0, errNotEnoughSpace
