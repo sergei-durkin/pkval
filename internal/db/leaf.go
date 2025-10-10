@@ -228,7 +228,13 @@ func (l *Leaf) Write(data []byte) (n int, err error) {
 	return copy(l.data[:], data), nil
 }
 
-func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
+func (l *Leaf) IsFull() bool {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	return l.count >= maxDegree || l.head+l.tail >= uint32(leafDataSize)/2
+}
+
+func (src *Leaf) Split(dst *Leaf) (pivot Key) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
 	if dst.count != 0 {
@@ -250,13 +256,6 @@ func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
 	midOffset := offsets[mid]
 	midKey := src.keyByOffset(midOffset.key)
 	midEntry := src.entryByOffset(midOffset.entry)
-
-	cmp := k.Compare(midKey)
-	lt, gt, eq := cmp == -1, cmp == 1, cmp == 0
-	if eq {
-		// update entry
-		midEntry = e
-	}
 
 	src.count = 0
 	dst.count = 1 // mid entry
@@ -280,13 +279,6 @@ func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
 			dst.count++
 		}
 
-		// insert
-		if gt {
-			keyPtr = writeKey(data, k, keyPtr)
-			entryPtr = writeLeafEntry(data, e, entryPtr)
-			dst.count++
-		}
-
 		dst.head = uint32(keyPtr)
 		dst.tail = uint32(leafDataSize) - uint32(entryPtr)
 	}
@@ -301,13 +293,6 @@ func (src *Leaf) MoveAndPlace(dst *Leaf, k Key, e Entry) (pivot Key) {
 
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
 			entryPtr = writeLeafEntry(data, src.entryByOffset(o.entry), entryPtr)
-			src.count++
-		}
-
-		// insert
-		if lt {
-			keyPtr = writeKey(data, k, keyPtr)
-			entryPtr = writeLeafEntry(data, e, entryPtr)
 			src.count++
 		}
 

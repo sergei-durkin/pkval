@@ -59,7 +59,7 @@ func TestNodeInsert(t *testing.T) {
 	}
 }
 
-func TestNodeMoveAndPlace(t *testing.T) {
+func TestNodeSplit(t *testing.T) {
 	armtracer.Begin()
 	defer armtracer.End()
 
@@ -90,7 +90,7 @@ func TestNodeMoveAndPlace(t *testing.T) {
 	}
 
 	/*
-		before MoveAndPlace
+		before Split
 		src page
 			k: key,	        e:  15
 			k2: anotherKey, e2: 100
@@ -100,33 +100,38 @@ func TestNodeMoveAndPlace(t *testing.T) {
 		insert
 			k4: awesomeKey, e4: 1024
 
-		after MoveAndPlace
+		after Split
 		src page
 			k: key, e: 15
+			k3: otherKey,   e3: 500
 		dst page
-			k2: anotherKey, e2: 100
 			k4: awesomeKey, e4: 1024
 		pivot
-			k3: otherKey
+			k2: anotherKey
 	*/
 
 	k4 := []byte("awesomeKey")
 	e4 := uint64(1024)
 
+	err = src.Node().Insert(k4, e4)
+	if err != nil {
+		t.Errorf("insert return an error: %s", err.Error())
+	}
+
 	dst := NewPage(6, 6, PageTypeNode)
-	pivot := src.Node().MoveAndPlace(dst.Node(), k4, e4)
-	if pivot.Compare(k3) != 0 {
-		t.Fatalf("pivot should be equal with k3: %q != %q", k3, pivot)
+	pivot := src.Node().Split(dst.Node())
+	if pivot.Compare(k2) != 0 {
+		t.Fatalf("pivot should be equal with k3: %q != %q", k2, pivot)
 	}
 
 	srcOffsets := src.Node().offsets()
 	dstOffsets := dst.Node().offsets()
-	if len(srcOffsets) != 1 {
-		t.Fatalf("count src offsets should be 1: %d", len(srcOffsets))
+	if len(srcOffsets) != 2 {
+		t.Fatalf("count src offsets should be 2: %d", len(srcOffsets))
 	}
 
-	if len(dstOffsets) != 2 {
-		t.Fatalf("count dst offsets should be 2: %d", len(dstOffsets))
+	if len(dstOffsets) != 1 {
+		t.Fatalf("count dst offsets should be 1: %d", len(dstOffsets))
 	}
 
 	o1, o2 := srcOffsets[0], dstOffsets[0]
@@ -140,33 +145,33 @@ func TestNodeMoveAndPlace(t *testing.T) {
 		t.Fatalf("first entry of src page should be equal with e: %d != %d", e, srcEntry)
 	}
 
+	o3 := srcOffsets[1]
+	srcSecondKey := src.Node().keyByOffset(o3.key)
+	if srcSecondKey.Compare(k3) != 0 {
+		t.Fatalf("second key src page should be equal with k3: %q != %q", k3, srcSecondKey)
+	}
+
+	srcSecondEntry := src.Node().entryByOffset(o3.entry)
+	if srcSecondEntry != e3 {
+		t.Fatalf("second entry of src page should be equal with e3: %d != %d", e3, srcSecondEntry)
+	}
+
 	dstFirstKey := dst.Node().keyByOffset(o2.key)
-	if dstFirstKey.Compare(k2) != 0 {
-		t.Fatalf("first offset dst page should be equal with k2: %q != %q", k2, dstFirstKey)
+	if dstFirstKey.Compare(k4) != 0 {
+		t.Fatalf("first offset dst page should be equal with k4: %q != %q", k4, dstFirstKey)
 	}
 
 	dstFirstEntry := dst.Node().entryByOffset(o2.entry)
-	if dstFirstEntry != e2 {
-		t.Fatalf("first entry of dst page should be equal with e2: %d != %d", e2, dstFirstEntry)
+	if dstFirstEntry != e4 {
+		t.Fatalf("first entry of dst page should be equal with e4: %d != %d", e4, dstFirstEntry)
 	}
 
-	o3 := dstOffsets[1]
-	dstSecondKey := dst.Node().keyByOffset(o3.key)
-	if dstSecondKey.Compare(k4) != 0 {
-		t.Fatalf("second key dst page should be equal with k4: %q != %q", k4, dstSecondKey)
-	}
-
-	dstSecondEntry := dst.Node().entryByOffset(o3.entry)
-	if dstSecondEntry != e4 {
-		t.Fatalf("second entry of dst page should be equal with e4: %d != %d", e4, dstSecondEntry)
-	}
-
-	if dst.Node().less != e3 {
-		t.Fatalf("less dst pointer should be equal with e3: %d != %d", e3, dst.Node().less)
+	if dst.Node().less != e2 {
+		t.Fatalf("less dst pointer should be equal with e2: %d != %d", e2, dst.Node().less)
 	}
 }
 
-func TestNodeMoveAndPlaceEq(t *testing.T) {
+func TestNodeSplitEq(t *testing.T) {
 	armtracer.Begin()
 	defer armtracer.End()
 
@@ -197,7 +202,7 @@ func TestNodeMoveAndPlaceEq(t *testing.T) {
 	}
 
 	/*
-		before MoveAndPlace
+		before Split
 		src page
 			k: key,	        e:  15
 			k2: anotherKey, e2: 100
@@ -207,19 +212,25 @@ func TestNodeMoveAndPlaceEq(t *testing.T) {
 		insert
 			k2: anotherKey, e2: 100
 
-		after MoveAndPlace
+		after Split
 		src page
-			k: key, e: 15
+			k: key,	        e:  15
+			k3: otherKey,   e3: 500
 		dst page
 			k2: anotherKey, e4: 1024
 		pivot
-			k3: otherKey
+			k2: anotherKey
 	*/
 
 	e4 := uint64(1024)
 
+	err = src.Node().Update(k2, e4)
+	if err != nil {
+		t.Errorf("insert return an error: %s", err.Error())
+	}
+
 	dst := NewPage(6, 6, PageTypeNode)
-	pivot := src.Node().MoveAndPlace(dst.Node(), k2, e4)
+	pivot := src.Node().Split(dst.Node())
 	if pivot.Compare(k3) != 0 {
 		t.Fatalf("pivot should be equal with k3: %q != %q", k3, pivot)
 	}

@@ -184,8 +184,7 @@ func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
 		e = NewDataEntry(v)
 	}
 
-	existsEntry := p.Leaf().Find(k)
-	if existsEntry != nil {
+	if p.Leaf().Find(k) != nil {
 		if !upsert {
 			return nil, nil, errAlreadyExists
 		}
@@ -194,12 +193,17 @@ func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
 	} else {
 		err = p.Leaf().Insert(k, e)
 	}
-	if nil == err {
-		return t.root, append(pages, p), nil
+	if nil != err {
+		return nil, nil, err
+	}
+
+	if !p.Leaf().IsFull() {
+		pages = append(pages, p)
+		return t.root, pages, nil
 	}
 
 	extra := t.pager.Alloc(p.Header().lsn, PageTypeLeaf)
-	pivot := p.Leaf().MoveAndPlace(extra.Leaf(), k, e)
+	pivot := p.Leaf().Split(extra.Leaf())
 
 	pages = append(pages, p)
 	pages = append(pages, extra)
@@ -210,12 +214,16 @@ func (t *Tree) upsert(k Key, v []byte, upsert bool) (*Page, []*Page, error) {
 		path = path[:len(path)-1]
 
 		err = parent.Node().Insert(pivot, next)
-		if nil == err {
-			return nil, append(pages, parent), nil
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if !parent.Node().IsFull() {
+			return nil, pages, nil
 		}
 
 		extra = t.pager.Alloc(0, PageTypeNode)
-		pivot = parent.Node().MoveAndPlace(extra.Node(), pivot, next)
+		pivot = parent.Node().Split(extra.Node())
 
 		pages = append(pages, parent)
 		pages = append(pages, extra)
