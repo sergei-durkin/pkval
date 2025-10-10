@@ -59,7 +59,7 @@ func TestLeafInsert(t *testing.T) {
 	}
 }
 
-func TestLeafMoveAndPlace(t *testing.T) {
+func TestLeafSplit(t *testing.T) {
 	armtracer.Begin()
 	defer armtracer.End()
 
@@ -92,7 +92,7 @@ func TestLeafMoveAndPlace(t *testing.T) {
 	}
 
 	/*
-		before MoveAndPlace
+		before Split
 		src page
 			k: key,	        e:  entry
 			k2: anotherKey, e2: anotherEntry
@@ -102,7 +102,7 @@ func TestLeafMoveAndPlace(t *testing.T) {
 		insert
 			k4: awesomeKey, e4: awesomeEntry
 
-		after MoveAndPlace
+		after Split
 		src page
 			k: key,       e: entry
 			k3: otherKey, e: otherEntry
@@ -110,14 +110,19 @@ func TestLeafMoveAndPlace(t *testing.T) {
 			k2: anotherKey, e2: anotherEntry
 			k4: awesomeKey, e4: awesomeEntry
 		pivot
-			k2: anotherKey, e2: anotherEntry
+			k2: anotherKey
 	*/
 
 	k4 := []byte("awesomeKey")
 	e4 := []byte("awesomeEntry")
 
+	err = src.Leaf().Insert(k4, e4)
+	if err != nil {
+		t.Fatalf("insert return an error: %s", err.Error())
+	}
+
 	dst := NewPage(6, 6, PageTypeLeaf)
-	pivot := src.Leaf().MoveAndPlace(dst.Leaf(), k4, e4)
+	pivot := src.Leaf().Split(dst.Leaf())
 	if pivot.Compare(k2) != 0 {
 		t.Fatalf("pivot should be equal with k2: %q != %q", k2, pivot)
 	}
@@ -156,12 +161,23 @@ func TestLeafMoveAndPlace(t *testing.T) {
 
 	dstKey := dst.Leaf().keyByOffset(o2.key)
 	if dstKey.Compare(k2) != 0 {
-		t.Fatalf("first key dst page should be equal with k3: %q != %q", k3, srcSecondKey)
+		t.Fatalf("first key dst page should be equal with k2: %q != %q", k2, dstKey)
 	}
 
 	dstEntry := dst.Leaf().entryByOffset(o2.entry)
 	if !bytes.Equal(dstEntry, e2) {
 		t.Fatalf("first entry of dst page should be equal with e2: %q != %q", e2, dstEntry)
+	}
+
+	o4 := dstOffsets[1]
+	dstSecondKey := dst.Leaf().keyByOffset(o4.key)
+	if dstSecondKey.Compare(k4) != 0 {
+		t.Fatalf("second key dst page should be equal with k4: %q != %q", k4, dstSecondKey)
+	}
+
+	dstSecondEntry := dst.Leaf().entryByOffset(o4.entry)
+	if !bytes.Equal(dstSecondEntry, e4) {
+		t.Fatalf("second entry of dst page should be equal with e4: %q != %q", e4, dstSecondEntry)
 	}
 
 	if dst.Leaf().left != 5 {
@@ -181,7 +197,7 @@ func TestLeafMoveAndPlace(t *testing.T) {
 	}
 }
 
-func TestLeafMoveAndPlaceEq(t *testing.T) {
+func TestLeafSplitEq(t *testing.T) {
 	armtracer.Begin()
 	defer armtracer.End()
 
@@ -214,30 +230,34 @@ func TestLeafMoveAndPlaceEq(t *testing.T) {
 	}
 
 	/*
-		before MoveAndPlace
+		before Split
 		src page
 			k: key,	        e:  entry
-			k2: anotherKey, e2: anotherEntry
 			k3: otherKey,   e3: otherEntry
+			k2: anotherKey, e2: anotherEntry
 		dst page
 			empty
-		insert
-			k2: awesomeKey, e4: awesomeEntry
+		update
+			k2: anotherKey, e4: awesomeEntry
 
-		after MoveAndPlace
+		after Split
 		src page
 			k: key,       e: entry
 			k3: otherKey, e: otherEntry
 		dst page
-			k2: anotherKey, e2: awesomeEntry
+			k2: anotherKey, e4: awesomeEntry
 		pivot
 			k2: anotherKey
 	*/
-
 	e4 := []byte("awesomeEntry")
 
+	err = src.Leaf().Update(k2, e4)
+	if err != nil {
+		t.Fatalf("insert return an error: %s", err.Error())
+	}
+
 	dst := NewPage(6, 6, PageTypeLeaf)
-	pivot := src.Leaf().MoveAndPlace(dst.Leaf(), k2, e4)
+	pivot := src.Leaf().Split(dst.Leaf())
 	if pivot.Compare(k2) != 0 {
 		t.Fatalf("pivot should be equal with k2: %q != %q", k2, pivot)
 	}
@@ -249,7 +269,7 @@ func TestLeafMoveAndPlaceEq(t *testing.T) {
 	}
 
 	if len(dstOffsets) != 1 {
-		t.Fatalf("count dst offsets should be 2: %d", len(dstOffsets))
+		t.Fatalf("count dst offsets should be 1: %d", len(dstOffsets))
 	}
 
 	o1, o2 := srcOffsets[0], dstOffsets[0]

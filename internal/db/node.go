@@ -65,6 +65,41 @@ func (n *Node) Find(k Key) (next uint64, found bool) {
 	return prev, prev > 0
 }
 
+func (n *Node) DeleteByChildID(e uint64) (err error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	offsets := n.offsets()
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		if e == n.entryByOffset(o.entry) {
+			// remove key
+			offsets[i], offsets[len(offsets)-1] = offsets[len(offsets)-1], offsets[i]
+			offsets = offsets[:len(offsets)-1]
+		}
+	}
+
+	data := make([]byte, nodeDataSize)
+
+	keyPtr := 0
+	entryPtr := int(nodeDataSize)
+
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+
+		keyPtr = writeKey(data, n.keyByOffset(o.key), keyPtr)
+		entryPtr = writeNodeEntry(data, n.entryByOffset(o.entry), entryPtr)
+	}
+
+	copy(n.data[:], data)
+
+	n.head = uint32(keyPtr)
+	n.tail = uint32(nodeDataSize) - uint32(entryPtr)
+
+	n.count--
+	return nil
+}
+
 func (n *Node) Insert(k Key, e uint64) (err error) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
@@ -94,6 +129,21 @@ func (n *Node) Insert(k Key, e uint64) (err error) {
 	return nil
 }
 
+func (n *Node) Update(k Key, e uint64) (err error) {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	offsets := n.offsets()
+	for i := 0; i < len(offsets); i++ {
+		o := offsets[i]
+		if k.Compare(n.keyByOffset(o.key)) == 0 {
+			pack.Uint64(n.data[o.entry.offset:], e, 0)
+			return
+		}
+	}
+
+	return errNotFound
+}
+
 func (n *Node) Write(data []byte) (cnt int, err error) {
 	if len(data) > len(n.data) {
 		return 0, errNotEnoughSpace
@@ -102,15 +152,17 @@ func (n *Node) Write(data []byte) (cnt int, err error) {
 	return copy(n.data[:], data), nil
 }
 
-func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
+func (n *Node) IsFull() bool {
+	defer armtracer.EndTrace(armtracer.BeginTrace(""))
+
+	return n.count >= maxDegree || n.head+n.tail >= uint32(nodeDataSize)/2
+}
+
+func (src *Node) Split(dst *Node) (pivot Key) {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
 	if dst.count != 0 {
 		panic("dst node is not empty")
-	}
-
-	if len(k) > maxKeySize {
-		panic("key too large")
 	}
 
 	if src.count <= 2 {
@@ -124,20 +176,8 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 	midKey := src.keyByOffset(midOffset.key)
 	midEntry := src.entryByOffset(midOffset.entry)
 
-	cmp := k.Compare(midKey)
-	lt, gt, eq := cmp == -1, cmp == 1, cmp == 0
-
-	updated := false
-
-	{ // if mid == key then update entry with new val
-		if eq {
-			midEntry = e
-			updated = true
-		}
-
-		pivot = append([]byte{}, midKey...)
-		dst.less = midEntry
-	}
+	pivot = append([]byte{}, midKey...)
+	dst.less = midEntry
 
 	src.count = 0
 	dst.count = 0
@@ -150,22 +190,10 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 		for i := mid + 1; i < len(offsets); i++ {
 			o := offsets[i]
 
-			okey := src.keyByOffset(o.key)
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
 
-			if okey.Compare(k) == 0 {
-				updated = true
-				entryPtr = writeNodeEntry(data, e, entryPtr)
-			} else {
-				entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
-			}
+			entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
 
-			dst.count++
-		}
-
-		if !updated && gt {
-			keyPtr = writeKey(data, k, keyPtr)
-			entryPtr = writeNodeEntry(data, e, entryPtr)
 			dst.count++
 		}
 
@@ -181,22 +209,10 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 		for i := 0; i < mid; i++ {
 			o := offsets[i]
 
-			okey := src.keyByOffset(o.key)
 			keyPtr = writeKey(data, src.keyByOffset(o.key), keyPtr)
 
-			if okey.Compare(k) == 0 {
-				updated = true
-				entryPtr = writeNodeEntry(data, e, entryPtr)
-			} else {
-				entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
-			}
+			entryPtr = writeNodeEntry(data, src.entryByOffset(o.entry), entryPtr)
 
-			src.count++
-		}
-
-		if !updated && lt {
-			keyPtr = writeKey(data, k, keyPtr)
-			entryPtr = writeNodeEntry(data, e, entryPtr)
 			src.count++
 		}
 
@@ -209,21 +225,21 @@ func (src *Node) MoveAndPlace(dst *Node, k Key, e uint64) (pivot Key) {
 	return pivot
 }
 
-func (l *Node) offsets() []dataOffset {
+func (n *Node) offsets() []dataOffset {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
-	res := make([]dataOffset, l.count)
+	res := make([]dataOffset, n.count)
 
 	keyPtr := 0
-	entryPtr := len(l.data)
+	entryPtr := len(n.data)
 
-	for i := 0; i < int(l.count); i++ {
+	for i := 0; i < int(n.count); i++ {
 		var (
 			lnKey uint16
 			o     dataOffset
 		)
 
-		lnKey, keyPtr = unpack.Uint16(l.data[:], keyPtr)
+		lnKey, keyPtr = unpack.Uint16(n.data[:], keyPtr)
 		o.key = keyOffset{len: int(lnKey), offset: keyPtr}
 		keyPtr += int(lnKey)
 
@@ -236,24 +252,24 @@ func (l *Node) offsets() []dataOffset {
 	return res
 }
 
-func (l *Node) sortedOffsets() []dataOffset {
+func (n *Node) sortedOffsets() []dataOffset {
 	defer armtracer.EndTrace(armtracer.BeginTrace(""))
 
-	offsets := l.offsets()
+	offsets := n.offsets()
 
 	sort.Slice(offsets, func(i, j int) bool {
-		return l.keyByOffset(offsets[i].key).Less(l.keyByOffset(offsets[j].key))
+		return n.keyByOffset(offsets[i].key).Less(n.keyByOffset(offsets[j].key))
 	})
 
 	return offsets
 }
 
-func (l *Node) keyByOffset(o keyOffset) Key {
-	return l.data[o.offset : o.offset+o.len]
+func (n *Node) keyByOffset(o keyOffset) Key {
+	return n.data[o.offset : o.offset+o.len]
 }
 
-func (l *Node) entryByOffset(o entryOffset) uint64 {
-	res, _ := unpack.Uint64(l.data[o.offset:], 0)
+func (n *Node) entryByOffset(o entryOffset) uint64 {
+	res, _ := unpack.Uint64(n.data[o.offset:], 0)
 	return res
 }
 
