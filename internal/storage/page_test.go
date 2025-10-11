@@ -1,16 +1,16 @@
-package storage_test
+package storage
 
 import (
 	"math/rand"
 	"testing"
-	"wal/internal/storage"
 )
 
 func TestWrite(t *testing.T) {
-	p := storage.Page{}
+	p := Page{}
+	p.Reset()
 
 	data := []byte("Hello, World!")
-	expectedDataSize := len(data) + storage.MetaDataSize
+	expectedDataSize := len(data) + int(metaSize)
 	n, err := p.Write(data, -1)
 	if err != nil {
 		t.Fatal("Write failed:", err)
@@ -20,7 +20,7 @@ func TestWrite(t *testing.T) {
 		t.Fatalf("Write returned %d, want %d", n, len(data))
 	}
 
-	if p.Len() != expectedDataSize {
+	if p.Len() != uint32(expectedDataSize) {
 		t.Fatalf("Page cur is %d, want %d", p.Len(), expectedDataSize)
 	}
 
@@ -29,13 +29,13 @@ func TestWrite(t *testing.T) {
 		t.Fatalf("GetSegments returned %d segments, want 1", len(segments))
 	}
 
-	if string(segments[0].Data) != string(data) {
-		t.Fatalf("Segment data is %s, want %s", string(segments[0].Data), string(data))
+	if string(segments[0].Data()) != string(data) {
+		t.Fatalf("Segment data is %s, want %s", string(segments[0].Data()), string(data))
 	}
 }
 
 func TestGetSegmentsMultiple(t *testing.T) {
-	p := storage.Page{}
+	p := Page{}
 
 	data := []byte("Hello, World! This is a test of multiple writes.")
 	var expectedDataSize int
@@ -46,7 +46,7 @@ func TestGetSegmentsMultiple(t *testing.T) {
 	i := 0
 	for len(temp) > 0 {
 		rndIdx := rand.Intn(len(temp)) + 1
-		expectedDataSize += rndIdx + storage.MetaDataSize
+		expectedDataSize += rndIdx + int(metaSize)
 
 		n, err := p.Write(temp[:rndIdx], -1)
 		if err != nil {
@@ -62,7 +62,7 @@ func TestGetSegmentsMultiple(t *testing.T) {
 		i++
 	}
 
-	if p.Len() != expectedDataSize {
+	if p.Len() != uint32(expectedDataSize) {
 		t.Fatalf("Page cur is %d, want %d", p.Len(), expectedDataSize)
 	}
 
@@ -73,7 +73,7 @@ func TestGetSegmentsMultiple(t *testing.T) {
 
 	reconstructed := make([]byte, 0, len(data))
 	for _, seg := range segments {
-		reconstructed = append(reconstructed, seg.Data...)
+		reconstructed = append(reconstructed, seg.Data()...)
 	}
 
 	if string(reconstructed) != string(data) {
@@ -82,9 +82,9 @@ func TestGetSegmentsMultiple(t *testing.T) {
 }
 
 func TestPackAndFromBytes(t *testing.T) {
-	p := storage.Page{}
+	p := Page{}
 	data := []byte("Hello, World!")
-	expectedDataSize := len(data) + storage.MetaDataSize
+	expectedDataSize := len(data) + int(metaSize)
 	n, err := p.Write(data, -1)
 	if err != nil {
 		t.Fatal("Write failed:", err)
@@ -94,17 +94,13 @@ func TestPackAndFromBytes(t *testing.T) {
 		t.Fatalf("Write returned %d, want %d", n, len(data))
 	}
 
-	if p.Len() != expectedDataSize {
+	if p.Len() != uint32(expectedDataSize) {
 		t.Fatalf("Page cur is %d, want %d", p.Len(), expectedDataSize)
 	}
 
-	buff := make([]byte, storage.PageSize)
-	err = p.Pack(buff)
-	if err != nil {
-		t.Fatal("Pack failed:", err)
-	}
+	buff := p.Pack()
 
-	var p2 storage.Page
+	var p2 Page
 	err = p2.FromBytes(buff)
 	if err != nil {
 		t.Fatal("FromBytes failed:", err)
@@ -115,7 +111,7 @@ func TestPackAndFromBytes(t *testing.T) {
 		t.Fatalf("GetSegments returned %d segments, want 1", len(segments))
 	}
 
-	if string(segments[0].Data) != string(data) {
-		t.Fatalf("Segment data is %s, want %s", string(segments[0].Data), string(data))
+	if string(segments[0].Data()) != string(data) {
+		t.Fatalf("Segment data is %s, want %s", string(segments[0].Data()), string(data))
 	}
 }

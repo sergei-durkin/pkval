@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"bytes"
 	"context"
 	"sync/atomic"
 	"testing"
@@ -15,10 +16,9 @@ func TestSyncPageBuffer(t *testing.T) {
 	ctx := context.Background()
 	syncInterval := 1 * time.Second
 
-	expectedData := make([]byte, storage.PageSize)
 	p := storage.Page{}
 	p.Write([]byte("Hello, World!"), -1)
-	p.Pack(expectedData)
+	expectedData := p.Pack()
 
 	actualData := []byte{}
 	syncCalled := int32(0)
@@ -61,8 +61,12 @@ func TestSyncPageBuffer(t *testing.T) {
 
 	<-syncCh
 
-	if string(actualData) != string(expectedData) {
-		t.Errorf("data mismatch: expected %q, got %q", expectedData, actualData)
+	if !bytes.Equal(expectedData, actualData) {
+		for i := 0; i < len(expectedData); i++ {
+			if expectedData[i] != actualData[i] {
+				t.Errorf("data mismatch at index %d: expected %q, got %q, %q != %q", i, expectedData[i], actualData[i], expectedData[max(0, i-10):min(len(expectedData), i+10)], actualData[max(0, i-10):min(len(expectedData), i+10)])
+			}
+		}
 	}
 }
 
