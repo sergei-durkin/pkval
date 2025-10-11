@@ -79,7 +79,7 @@ func (lr *logReader) Read() []logItem {
 			// Full chunk
 			if !ch.IsPart() {
 				bufferChunk.typ |= full
-				bufferChunk.data = ch.Data
+				bufferChunk.data = ch.Data()
 				result = append(result, bufferChunk)
 
 				continue
@@ -93,7 +93,7 @@ func (lr *logReader) Read() []logItem {
 					bufferChunk.typ |= endless
 				}
 
-				bufferChunk.data = ch.Data
+				bufferChunk.data = ch.Data()
 				result = append(result, bufferChunk)
 
 				continue
@@ -101,7 +101,7 @@ func (lr *logReader) Read() []logItem {
 
 			// Endless chunk
 			if ch.IsPart() && result[len(result)-1].IsEndless() {
-				result[len(result)-1].data = append(result[len(result)-1].data, ch.Data...)
+				result[len(result)-1].data = append(result[len(result)-1].data, ch.Data()...)
 				if ch.IsEnd() {
 					result[len(result)-1].typ &^= endless
 				}
@@ -112,7 +112,7 @@ func (lr *logReader) Read() []logItem {
 			if !ch.IsEnd() {
 				bufferChunk.typ |= endless
 			}
-			bufferChunk.data = ch.Data
+			bufferChunk.data = ch.Data()
 			result = append(result, bufferChunk)
 		}
 	}

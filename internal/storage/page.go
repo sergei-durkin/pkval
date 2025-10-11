@@ -9,85 +9,83 @@ import (
 
 const (
 	PageSize     = 1 << 13
-	PageDataSize = PageSize - headerSize - tailSize
+	PageDataSize = PageSize - headerSize
 
-	// MetaData for each segment
-	MetaDataSize = 1 + 4 + 4 // type (1 byte) + length of segment (4 bytes) + remaining length (4 bytes
+	// | type | len | rem |
+	metaSize = 1 + 4 + 4
+
+	headerSize   = unsafe.Sizeof(header{})
+	checksumSize = unsafe.Sizeof(uint32(0))
 )
 
-type MetaData struct {
-	typ uint8  // type of segment
-	ln  uint32 // length of segment
-	rem uint32 // remaining length
-}
+type Page [PageSize]byte
 
-const (
-	headerSize = int(unsafe.Sizeof(header{}))
-	tailSize   = int(unsafe.Sizeof(tail{}))
-)
-
-type Page struct {
-	isSynced bool // whether the page has been synced to disk
-	cur      int
-
-	header
-	tail
-
-	data [PageDataSize]byte
+func (p *Page) Header() *header {
+	return (*header)(unsafe.Pointer(p))
 }
 
 type header struct {
-	typ     uint16 // page type
-	version uint16
-
-	_ [60]byte // padding to 64 bytes
-}
-
-type tail struct {
 	checksum uint32
 
-	_ [60]byte // padding to 64 bytes
+	typ     uint16
+	version uint16
+	head    uint32
+
+	_ [48]byte // padding to 64 bytes
 }
 
 type Segment struct {
-	MetaData
+	typ segmentType
+	ln  uint32
+	rem uint32
 
-	Data []byte
+	data []byte
 }
 
-func (c *Segment) IsPart() bool {
-	return c.typ != 1
+func (s *Segment) Data() []byte {
+	return s.data
 }
 
-func (c *Segment) IsEnd() bool {
-	return c.typ == 2
+func (s *Segment) IsPart() bool {
+	return s.typ != 1
+}
+
+func (s *Segment) IsEnd() bool {
+	return s.typ == 2
 }
 
 // GetSegments returns all segments in the page.
 func (p *Page) GetSegments() []Segment {
 	var result []Segment
 
-	data := p.data[:]
-
-	for ptr := 0; ptr < PageDataSize; {
-		if ptr+MetaDataSize >= PageDataSize {
+	data := p[headerSize:]
+	for ptr := 0; ptr < int(PageDataSize); {
+		if ptr+int(metaSize) >= int(PageDataSize) {
 			break
 		}
 
-		chunk := Segment{}
+		var (
+			typ uint8
+			ln  uint32
+			rem uint32
+		)
 
-		chunk.typ, ptr = unpack.Uint8(data, ptr)
-		chunk.ln, ptr = unpack.Uint32(data, ptr)
-		chunk.rem, ptr = unpack.Uint32(data, ptr)
+		typ, ptr = unpack.Uint8(data, ptr)
+		ln, ptr = unpack.Uint32(data, ptr)
+		rem, ptr = unpack.Uint32(data, ptr)
 
-		if chunk.ln == 0 || int(chunk.ln)+ptr >= PageDataSize {
+		if ln == 0 || int(ln)+ptr >= int(PageDataSize) {
 			break
 		}
 
-		chunk.Data = make([]byte, chunk.ln)
-		ptr += copy(chunk.Data, data[ptr:ptr+int(chunk.ln)])
+		s := Segment{}
+		s.typ = segmentType(typ)
+		s.ln = ln
+		s.rem = rem
+		s.data = data[ptr : ptr+int(ln)]
+		ptr += int(ln)
 
-		result = append(result, chunk)
+		result = append(result, s)
 	}
 
 	return result
@@ -99,29 +97,10 @@ func (p *Page) FromBytes(b []byte) error {
 		return errBufferTooSmall
 	}
 
-	ptr := 0
+	copy(p[:], b)
 
-	// Header
-
-	// Type
-	p.typ, ptr = unpack.Uint16(b, ptr)
-
-	// Version
-	p.version, ptr = unpack.Uint16(b, ptr)
-
-	// Data
-	copy(p.data[:], b[headerSize:PageSize-tailSize])
-
-	// Current position is at the end of data
-	p.cur = -1
-
-	// Tail
-
-	// Checksum
-	p.checksum, _ = unpack.Uint32(b, PageSize-tailSize)
-
-	cks := crc32.ChecksumIEEE(p.data[:])
-	if cks != p.checksum {
+	cks := crc32.ChecksumIEEE(p[checksumSize:])
+	if cks != p.Header().checksum {
 		return errChecksumMismatch
 	}
 
@@ -129,96 +108,62 @@ func (p *Page) FromBytes(b []byte) error {
 }
 
 // HasSpace returns true if the page has enough space to store n bytes including metadata.
-func (p *Page) HasSpace(n int) bool {
-	return !p.isSynced && PageDataSize-MetaDataSize-p.cur >= n
+func (p *Page) HasSpace(n uint32) bool {
+	h := p.Header()
+	return PageSize >= h.head+uint32(headerSize+metaSize)+n
 }
 
-func (p *Page) IsSynced() bool {
-	return p.isSynced
-}
-
-func (p *Page) Len() int {
-	return p.cur
-}
-
-func (p *Page) MarkAsSynced() {
-	p.isSynced = true
+func (p *Page) Len() uint32 {
+	return p.Header().head
 }
 
 // Pack packs the page into the given buffer.
-func (p *Page) Pack(b []byte) error {
-	if len(b) < PageSize {
-		return errBufferTooSmall
-	}
-
-	// Clear buffer
-	for i := 0; i < len(b); i++ {
-		b[i] = 0
-	}
-
-	ptr := 0
-
-	// Header
-
-	// Type
-	ptr = pack.Uint16(b, p.typ, ptr)
-
-	// Version
-	ptr = pack.Uint16(b, p.version, ptr)
-
-	// Data
-	copy(b[headerSize:headerSize+p.cur], p.data[:])
-
-	// Tail
-
-	// Checksum
-	_ = pack.Uint32(b, p.checksum, PageSize-tailSize)
-
-	return nil
+func (p *Page) Pack() []byte {
+	return p[:]
 }
 
 // Reset resets the page to initial state.
 func (p *Page) Reset() {
-	p.isSynced = false
-	p.cur = 0
-	p.checksum = 0
-	for i := range p.data {
-		p.data[i] = 0
+	for i := 0; i < PageSize; i++ {
+		p[i] = 0
 	}
 }
 
+type segmentType uint8
+
+const (
+	segmentTypeFull   segmentType = 1
+	segmentTypeEnd    segmentType = 2
+	segmentTypeMiddle segmentType = 3
+)
+
 // Write writes data to the page, remaining is the remaining length of the entire data size, -1 means full data.
 func (p *Page) Write(data []byte, remaining int32) (n int, err error) {
-	// Metadata of segment
-	// | type (1 byte) means is part data | length of segment (4 bytes) | remaining length (4 bytes) | data (portion length bytes) |
-	meta := make([]byte, MetaDataSize)
-	ptr := 0
+	var typ segmentType
 
-	// Type of segment
 	switch remaining {
 	case -1:
-		ptr = pack.Uint8(meta, 1, ptr) // full data
+		typ = segmentTypeFull
 		remaining = 0
 	case 0:
-		ptr = pack.Uint8(meta, 2, ptr) // end segment
+		typ = segmentTypeEnd
 	default:
-		ptr = pack.Uint8(meta, 3, ptr) // middle segment
+		typ = segmentTypeMiddle
 	}
 
-	// Length of segment
+	h := p.Header()
+
 	ln := len(data)
-	ptr = pack.Uint32(meta, uint32(ln), ptr)
+	ptr := int(headerSize) + int(h.head)
+	ptr = pack.Uint8(p[:], uint8(typ), ptr)
+	ptr = pack.Uint32(p[:], uint32(ln), ptr)
+	ptr = pack.Uint32(p[:], uint32(remaining), ptr)
+	n = copy(p[ptr:], data)
 
-	// Remaining length
-	ptr = pack.Uint32(meta, uint32(remaining), ptr)
+	h.head += metaSize
+	h.head += uint32(n)
 
-	n = copy(p.data[p.cur:], meta)
-	p.cur += n
-
-	n = copy(p.data[p.cur:], data)
-	p.cur += n
-
-	p.checksum = crc32.ChecksumIEEE(p.data[:])
+	h.checksum = crc32.ChecksumIEEE(p[checksumSize:])
 
 	return n, nil
 }

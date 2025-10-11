@@ -15,6 +15,7 @@ const (
 type PageBuffer struct {
 	cur   int
 	pages [CountPages]Page
+	dirty [CountPages]bool
 	w     wal.WriterCloser
 
 	bufferPool sync.Pool
@@ -79,14 +80,12 @@ func NewPageBuffer(ctx context.Context, syncInterval time.Duration, writerProvid
 	return pageBuffer, nil
 }
 
-const segmentSize = PageDataSize - MetaDataSize - 1
-
 // Write concurrent writes data to the disk
 func (pb *PageBuffer) Write(data []byte) (err error) {
 	pb.mu.Lock()
 	defer pb.mu.Unlock()
 
-	if len(data)+MetaDataSize < PageDataSize {
+	if len(data)+int(metaSize) < int(PageDataSize) {
 		// If current page has space, write to it
 		err = pb.write(data, -1)
 		if nil == err {
@@ -98,7 +97,7 @@ func (pb *PageBuffer) Write(data []byte) (err error) {
 
 	// If data is larger than a page, split it into segments
 	for len(data) > 0 {
-		psize := min(len(data), segmentSize)
+		psize := min(len(data), int(PageDataSize-metaSize))
 		segment := data[0:psize]
 		data = data[psize:]
 
@@ -119,7 +118,7 @@ func (pb *PageBuffer) sync() {
 	defer pb.bufferPool.Put(buff)
 
 	for i := 0; i <= ln; i++ {
-		if pb.pages[i].IsSynced() {
+		if !pb.dirty[i] {
 			continue
 		}
 
@@ -127,14 +126,9 @@ func (pb *PageBuffer) sync() {
 			break
 		}
 
-		pb.pages[i].MarkAsSynced()
+		pb.dirty[i] = false
 
-		err := pb.pages[i].Pack(buff)
-		if err != nil {
-			panic(err)
-		}
-
-		n, err := pb.w.Write(buff)
+		n, err := pb.w.Write(pb.pages[i].Pack())
 		if err != nil {
 			panic(err)
 		}
@@ -155,6 +149,7 @@ func (pb *PageBuffer) reset() {
 	pb.cur = 0
 	for i := range pb.pages {
 		pb.pages[i].Reset()
+		pb.dirty[i] = false
 	}
 
 	err := pb.w.Close()
@@ -170,7 +165,7 @@ func (pb *PageBuffer) reset() {
 
 // write writes data to the current page, if the current page is full, it moves to the next page
 func (pb *PageBuffer) write(data []byte, remaining int32) error {
-	if !pb.pages[pb.cur].HasSpace(len(data)) {
+	if !pb.dirty[pb.cur] || !pb.pages[pb.cur].HasSpace(uint32(len(data))) {
 		pb.cur++
 		if pb.cur >= CountPages {
 			pb.sync() // If no more pages, force sync to disk and reset
@@ -186,6 +181,8 @@ func (pb *PageBuffer) write(data []byte, remaining int32) error {
 	if n != len(data) {
 		panic(errShortWrite)
 	}
+
+	pb.dirty[pb.cur] = true
 
 	return nil
 }

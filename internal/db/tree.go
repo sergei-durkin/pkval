@@ -376,7 +376,7 @@ func (t *Tree) readOverflow(next uint64) (e Entry, err error) {
 	for next > 0 {
 		op, err := t.pager.Read(next)
 		if err != nil {
-			return Entry{}, fmt.Errorf("failed to read overflow page: %w", err)
+			return Entry{}, fmt.Errorf("failed to read overflow page with id %d: %w", next, err)
 		}
 
 		next = op.Overflow().next
