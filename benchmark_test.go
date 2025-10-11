@@ -2,7 +2,9 @@ package wal_test
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 	"wal/internal/cmd"
@@ -108,6 +110,105 @@ func BenchmarkLeafInsert(b *testing.B) {
 		if err != nil {
 			page = pg.Alloc(0, db.PageTypeLeaf)
 			leaf = page.Leaf()
+		}
+	}
+}
+
+const LN = 1 << 1         // len size
+const N = 1 << 22         // page size
+const K = 1 << 3          // key size
+const V = 1 << 12         // value size
+const P = LN + K + V + LN // element size
+const M = N / P           // count elements
+
+func init() {
+	fmt.Fprintf(os.Stderr, "Benchmark:\n\tPage size: %d\n\tKey size: %d\n\tValue size: %d\n\tCount elements: %d\n", N, K, V, M)
+}
+
+// | len | key | len | value |
+func BenchmarkReadPageSeq(b *testing.B) {
+	armtracer.Begin()
+	defer armtracer.End()
+
+	k := (uint64(100500100))
+	p := [N]byte{}
+	cur := 0
+	for i := 0; i < M-1; i++ {
+		binary.BigEndian.PutUint16(p[cur:], uint16(K))
+		cur += LN
+
+		binary.BigEndian.PutUint64(p[cur:], k)
+		cur += K
+
+		binary.BigEndian.PutUint16(p[cur:], uint16(V))
+		cur += LN + V
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cur := 0
+		for j := 0; j < M-1; j++ {
+			// read len key
+			lnK := binary.BigEndian.Uint16(p[cur:])
+			if K != lnK {
+				panic("found corrupted page")
+			}
+			cur += LN
+
+			// read key
+			kk := binary.BigEndian.Uint64(p[cur:])
+			if k != kk {
+				panic("found corrupted page")
+			}
+			cur += K
+
+			// read len value
+			ln := binary.BigEndian.Uint16(p[cur:])
+			if V != ln {
+				panic("found corrupted page")
+			}
+			cur += LN + V
+		}
+	}
+}
+
+// | len | key | len | key | ... | value | len | value | len |
+func BenchmarkReadPageCompressed(b *testing.B) {
+	armtracer.Begin()
+	defer armtracer.End()
+
+	k := (uint64(100500100))
+	p := [N]byte{}
+	cur := 0
+	tail := N - V - LN
+	for i := 0; i < M-1; i++ {
+		binary.BigEndian.PutUint16(p[cur:], uint16(K))
+		cur += LN
+
+		binary.BigEndian.PutUint64(p[cur:], k)
+		cur += K
+
+		binary.BigEndian.PutUint16(p[tail:], uint16(V))
+		tail -= V + LN
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cur := 0
+		for j := 0; j < M-1; j++ {
+			// read len key
+			lnK := binary.BigEndian.Uint16(p[cur:])
+			if K != lnK {
+				panic("found corrupted page")
+			}
+			cur += LN
+
+			// read key
+			kk := binary.BigEndian.Uint64(p[cur:])
+			if k != kk {
+				panic("found corrupted page")
+			}
+			cur += K
 		}
 	}
 }
